@@ -182,7 +182,7 @@ async function getSale(req, res, next) {
     if (!sale.rows.length) return res.status(404).json({ error: 'Sale not found.' });
 
     const itemRows = await query(
-      `SELECT si.quantity, si.unit_price, si.subtotal,
+      `SELECT si.product_id, si.quantity, si.unit_price, si.subtotal,
               p.name, p.product_code, p.unit
        FROM sale_items si
        JOIN products p ON p.id = si.product_id
