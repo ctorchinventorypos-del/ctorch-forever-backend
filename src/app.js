@@ -20,6 +20,7 @@ const customersRoutes = require('./routes/customers.routes');
 const salesRoutes = require('./routes/sales.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const returnsRoutes = require('./routes/returns.routes');
+const usersRoutes = require('./routes/users.routes');
 
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -64,6 +65,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/returns', returnsRoutes);
+app.use('/api/users', usersRoutes);
 
 // --- Error handler must be LAST ---
 app.use(errorHandler);
