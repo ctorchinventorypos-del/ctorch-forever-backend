@@ -94,4 +94,28 @@ async function listPayments(req, res, next) {
   }
 }
 
-module.exports = { createPayment, listPayments };
+// GET /api/payments/:id  -> data for a payment receipt (incl. amount remaining)
+async function getPayment(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT p.id, p.amount, p.note, p.created_at,
+              cu.name AS customer_name, cu.phone AS customer_phone,
+              cu.balance_owed AS remaining, cu.customer_type,
+              u.full_name AS received_by,
+              co.code AS company_code, co.name AS company_name,
+              co.address AS company_address, co.phone AS company_phone
+       FROM payments p
+       JOIN customers cu ON cu.id = p.customer_id
+       JOIN companies co ON co.id = p.company_id
+       LEFT JOIN users u ON u.id = p.user_id
+       WHERE p.id = $1 AND p.company_id = $2`,
+      [req.params.id, req.company.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Payment not found.' });
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createPayment, listPayments, getPayment };

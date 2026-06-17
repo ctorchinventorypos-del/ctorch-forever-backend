@@ -13,5 +13,6 @@ router.use(authenticate, resolveCompany);
 
 router.post('/', c.createPayment);
 router.get('/', c.listPayments);
+router.get('/:id', c.getPayment);
 
 module.exports = router;
