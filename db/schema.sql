@@ -99,6 +99,7 @@ CREATE TABLE products (
     unit               VARCHAR(30)  NOT NULL DEFAULT 'pcs',   -- pcs, roll, carton...
     cost_price         NUMERIC(14,2) NOT NULL DEFAULT 0,
     recommended_price  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    reorder_level      INT          NOT NULL DEFAULT 5,   -- low-stock threshold
     is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -182,6 +183,7 @@ CREATE TABLE sales (
     customer_id     INT          REFERENCES customers(id),   -- null for cash sales
     sale_type       VARCHAR(20)  NOT NULL
                       CHECK (sale_type IN ('cash','credit','reseller')),
+    payment_method  VARCHAR(20)  NOT NULL DEFAULT 'cash',  -- cash / transfer / pos
     invoice_number  VARCHAR(40)  UNIQUE NOT NULL,
     total_amount    NUMERIC(14,2) NOT NULL DEFAULT 0,
     amount_paid     NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -218,6 +220,7 @@ CREATE TABLE payments (
     customer_id  INT NOT NULL REFERENCES customers(id),
     sale_id      INT REFERENCES sales(id),
     amount       NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+    payment_method VARCHAR(20) NOT NULL DEFAULT 'cash',     -- cash / transfer / pos
     user_id      INT NOT NULL REFERENCES users(id),
     note         TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -241,6 +244,36 @@ CREATE TABLE returns (
     refund_amount  NUMERIC(14,2) NOT NULL,                 -- quantity * unit_price
     user_id        INT NOT NULL REFERENCES users(id),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- ----------------------------------------------------------------------------
+-- 12b. QUOTATIONS / PROFORMA INVOICES
+--    A price offer for a list of items. Does NOT affect stock or balances.
+--    When accepted, the Sales screen loads these items to complete a real sale.
+-- ----------------------------------------------------------------------------
+CREATE TABLE quotations (
+    id             SERIAL PRIMARY KEY,
+    company_id     INT          NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id        INT          NOT NULL REFERENCES users(id),
+    customer_id    INT          REFERENCES customers(id),
+    customer_name  VARCHAR(150),
+    quote_number   VARCHAR(40)  UNIQUE NOT NULL,
+    total_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,
+    note           TEXT,
+    status         VARCHAR(20)  NOT NULL DEFAULT 'open'
+                     CHECK (status IN ('open','converted')),
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE TABLE quotation_items (
+    id             SERIAL PRIMARY KEY,
+    quotation_id   INT NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+    product_id     INT REFERENCES products(id),
+    name_snapshot  VARCHAR(150) NOT NULL,
+    quantity       INT NOT NULL CHECK (quantity > 0),
+    unit_price     NUMERIC(14,2) NOT NULL,
+    subtotal       NUMERIC(14,2) NOT NULL
 );
 
 
@@ -276,6 +309,7 @@ CREATE INDEX idx_movements_product     ON stock_movements(product_id);
 CREATE INDEX idx_movements_company_date ON stock_movements(company_id, created_at);
 CREATE INDEX idx_customers_company_type ON customers(company_id, customer_type);
 CREATE INDEX idx_returns_company_date  ON returns(company_id, created_at);
+CREATE INDEX idx_quotations_company_date ON quotations(company_id, created_at);
 
 
 -- ----------------------------------------------------------------------------
@@ -299,6 +333,6 @@ SELECT id, 'Main Warehouse', TRUE FROM companies WHERE code = 'FOREVER';
 -- 16. FULL RESET (for clearing test data later — KEEP COMMENTED until needed)
 --     Uncomment and run ONLY when you want to wipe everything and start fresh.
 -- ============================================================================
--- DROP TABLE IF EXISTS audit_log, returns, payments, sale_items, sales,
+-- DROP TABLE IF EXISTS audit_log, quotation_items, quotations, returns, payments, sale_items, sales,
 --     customers, stock_movements, stock_levels, products, categories,
 --     branches, users, companies CASCADE;

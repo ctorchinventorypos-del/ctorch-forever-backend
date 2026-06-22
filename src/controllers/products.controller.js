@@ -17,6 +17,10 @@ async function listProducts(req, res, next) {
     const params = [req.company.id];
     let where = 'WHERE p.company_id = $1';
 
+    // By default only show active products; pass ?include_inactive=1 to see all.
+    if (req.query.include_inactive !== '1' && req.query.include_inactive !== 'true') {
+      where += ' AND p.is_active = TRUE';
+    }
     if (req.query.category_id) {
       params.push(req.query.category_id);
       where += ` AND p.category_id = $${params.length}`;
@@ -28,7 +32,7 @@ async function listProducts(req, res, next) {
 
     const { rows } = await query(
       `SELECT p.id, p.product_code, p.name, p.description, p.unit,
-              p.cost_price, p.recommended_price, p.is_active,
+              p.cost_price, p.recommended_price, p.is_active, p.reorder_level,
               p.category_id, c.name AS category_name,
               COALESCE(SUM(sl.quantity), 0)::int AS total_stock
        FROM products p
@@ -82,7 +86,7 @@ async function getProduct(req, res, next) {
 async function createProduct(req, res, next) {
   const {
     product_code, name, category_id, unit, cost_price, recommended_price,
-    description, initial_branch_id, initial_quantity,
+    description, initial_branch_id, initial_quantity, reorder_level,
   } = req.body;
 
   if (!product_code || !product_code.trim())
@@ -94,12 +98,14 @@ async function createProduct(req, res, next) {
     const product = await withTransaction(async (client) => {
       const inserted = await client.query(
         `INSERT INTO products
-           (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
         [
           req.company.id, category_id || null, product_code.trim(), name.trim(),
           description || null, unit || 'pcs', cost_price || 0, recommended_price || 0,
+          (reorder_level === undefined || reorder_level === null || reorder_level === '')
+            ? 5 : parseInt(reorder_level, 10) || 0,
         ]
       );
       const p = inserted.rows[0];
@@ -140,17 +146,18 @@ async function createProduct(req, res, next) {
 // NOTE: it deliberately does NOT change recommended_price (admin-only, separate route).
 async function updateProduct(req, res, next) {
   try {
-    const { name, category_id, unit, cost_price, description } = req.body;
+    const { name, category_id, unit, cost_price, description, reorder_level } = req.body;
 
     const { rows } = await query(
       `UPDATE products
-         SET name        = COALESCE($1, name),
-             category_id = $2,
-             unit        = COALESCE($3, unit),
-             cost_price  = COALESCE($4, cost_price),
-             description = $5,
-             updated_at  = now()
-       WHERE id = $6 AND company_id = $7
+         SET name          = COALESCE($1, name),
+             category_id   = $2,
+             unit          = COALESCE($3, unit),
+             cost_price    = COALESCE($4, cost_price),
+             description   = $5,
+             reorder_level = COALESCE($6, reorder_level),
+             updated_at    = now()
+       WHERE id = $7 AND company_id = $8
        RETURNING *`,
       [
         name ? name.trim() : null,
@@ -158,6 +165,8 @@ async function updateProduct(req, res, next) {
         unit || null,
         cost_price !== undefined && cost_price !== null ? cost_price : null,
         description || null,
+        (reorder_level === undefined || reorder_level === null || reorder_level === '')
+          ? null : parseInt(reorder_level, 10),
         req.params.id,
         req.company.id,
       ]
@@ -196,4 +205,31 @@ async function updatePrice(req, res, next) {
   }
 }
 
-module.exports = { listProducts, getProduct, createProduct, updateProduct, updatePrice };
+// PATCH /api/products/:id/active   { is_active }   (ADMIN ONLY)
+// Safe "remove": deactivating hides a product from sales and lists but keeps
+// all its past sales/returns history intact. Reactivate any time.
+async function setProductActive(req, res, next) {
+  try {
+    const active = req.body.is_active;
+    if (typeof active !== 'boolean') {
+      return res.status(400).json({ error: 'is_active must be true or false.' });
+    }
+    const { rows } = await query(
+      `UPDATE products SET is_active = $1, updated_at = now()
+       WHERE id = $2 AND company_id = $3
+       RETURNING id, name, is_active`,
+      [active, req.params.id, req.company.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Product not found.' });
+
+    await logAction({
+      userId: req.user.id, action: active ? 'reactivate_product' : 'deactivate_product',
+      entity: 'product', entityId: rows[0].id, ip: req.ip,
+    });
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { listProducts, getProduct, createProduct, updateProduct, updatePrice, setProductActive };

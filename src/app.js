@@ -5,6 +5,7 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { query } = require('./config/db');
@@ -21,15 +22,32 @@ const salesRoutes = require('./routes/sales.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 const returnsRoutes = require('./routes/returns.routes');
 const usersRoutes = require('./routes/users.routes');
+const reportsRoutes = require('./routes/reports.routes');
+const quotationsRoutes = require('./routes/quotations.routes');
 
 const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
 // --- Security & basics ---
-app.use(helmet());                        // sets secure HTTP headers
-app.use(express.json({ limit: '1mb' }));  // parse JSON request bodies
-app.set('trust proxy', 1);                // correct client IPs behind Render
+app.use(helmet());                          // sets secure HTTP headers
+app.use(
+  helmet.hsts({ maxAge: 15552000 })         // tell browsers to stick to HTTPS
+);
+app.use(express.json({ limit: '256kb' }));  // parse JSON bodies, capped in size
+app.set('trust proxy', 1);                  // correct client IPs behind Render
+
+// A gentle global ceiling so the API can't be hammered by one source.
+// (Login and sensitive admin actions have their own, stricter limiters.)
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 300,            // 300 requests / minute / IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please slow down.' },
+  })
+);
 
 // Only let your frontend call this API.
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
@@ -66,6 +84,8 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/returns', returnsRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/quotations', quotationsRoutes);
 
 // --- Error handler must be LAST ---
 app.use(errorHandler);

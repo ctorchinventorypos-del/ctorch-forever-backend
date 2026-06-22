@@ -10,6 +10,9 @@ const { logAction } = require('../utils/audit');
 async function createPayment(req, res, next) {
   const { customer_id, sale_id, note } = req.body;
   const amount = Number(req.body.amount);
+  const VALID_METHODS = ['cash', 'transfer', 'pos'];
+  const paymentMethod = VALID_METHODS.includes(req.body.payment_method)
+    ? req.body.payment_method : 'cash';
 
   if (!customer_id) return res.status(400).json({ error: 'Choose a customer.' });
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Enter an amount greater than 0.' });
@@ -24,10 +27,10 @@ async function createPayment(req, res, next) {
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
 
       const pay = await client.query(
-        `INSERT INTO payments (company_id, customer_id, sale_id, amount, user_id, note)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO payments (company_id, customer_id, sale_id, amount, payment_method, user_id, note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, amount, created_at`,
-        [req.company.id, customer_id, sale_id || null, amount, req.user.id, note || null]
+        [req.company.id, customer_id, sale_id || null, amount, paymentMethod, req.user.id, note || null]
       );
 
       // Reduce the balance, clamped at zero.
@@ -77,7 +80,7 @@ async function listPayments(req, res, next) {
     }
 
     const { rows } = await query(
-      `SELECT p.id, p.amount, p.note, p.created_at,
+      `SELECT p.id, p.amount, p.note, p.payment_method, p.created_at,
               cu.name AS customer_name, cu.customer_type,
               u.full_name AS received_by
        FROM payments p
@@ -98,7 +101,7 @@ async function listPayments(req, res, next) {
 async function getPayment(req, res, next) {
   try {
     const { rows } = await query(
-      `SELECT p.id, p.amount, p.note, p.created_at,
+      `SELECT p.id, p.amount, p.note, p.payment_method, p.created_at,
               cu.name AS customer_name, cu.phone AS customer_phone,
               cu.balance_owed AS remaining, cu.customer_type,
               u.full_name AS received_by,

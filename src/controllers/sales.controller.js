@@ -22,6 +22,9 @@ const { logAction } = require('../utils/audit');
 async function createSale(req, res, next) {
   const { branch_id, sale_type, customer_id, items } = req.body;
   let amountPaid = req.body.amount_paid;
+  const VALID_METHODS = ['cash', 'transfer', 'pos'];
+  const paymentMethod = VALID_METHODS.includes(req.body.payment_method)
+    ? req.body.payment_method : 'cash';
 
   if (!branch_id) return res.status(400).json({ error: 'Choose a branch.' });
   if (!['cash', 'credit', 'reseller'].includes(sale_type)) {
@@ -29,6 +32,9 @@ async function createSale(req, res, next) {
   }
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Add at least one item.' });
+  }
+  if (items.length > 300) {
+    return res.status(400).json({ error: 'Too many items on one sale (max 300).' });
   }
   if (sale_type !== 'cash' && !customer_id) {
     return res.status(400).json({ error: 'Choose a customer for a credit or reseller sale.' });
@@ -109,10 +115,10 @@ async function createSale(req, res, next) {
       //    set a friendly invoice number built from the new row's id.
       const inserted = await client.query(
         `INSERT INTO sales
-           (company_id, branch_id, user_id, customer_id, sale_type, invoice_number, total_amount, amount_paid)
-         VALUES ($1, $2, $3, $4, $5, md5(random()::text || clock_timestamp()::text), $6, $7)
+           (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid)
+         VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8)
          RETURNING id`,
-        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, total, amountPaid]
+        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, paymentMethod, total, amountPaid]
       );
       const saleId = inserted.rows[0].id;
 

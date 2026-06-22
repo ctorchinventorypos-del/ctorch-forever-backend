@@ -39,18 +39,21 @@ async function listCustomers(req, res, next) {
 async function getCustomer(req, res, next) {
   try {
     const cust = await query(
-      'SELECT * FROM customers WHERE id = $1 AND company_id = $2',
+      `SELECT cu.*, co.code AS company_code, co.name AS company_name,
+              co.address AS company_address, co.phone AS company_phone
+       FROM customers cu JOIN companies co ON co.id = cu.company_id
+       WHERE cu.id = $1 AND cu.company_id = $2`,
       [req.params.id, req.company.id]
     );
     if (!cust.rows.length) return res.status(404).json({ error: 'Customer not found.' });
 
     const sales = await query(
-      `SELECT id, invoice_number, sale_type, total_amount, amount_paid, created_at
+      `SELECT id, invoice_number, sale_type, payment_method, total_amount, amount_paid, created_at
        FROM sales WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [req.params.id]
     );
     const payments = await query(
-      `SELECT id, amount, note, created_at
+      `SELECT id, amount, payment_method, note, created_at
        FROM payments WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [req.params.id]
     );

@@ -19,6 +19,7 @@ router.get('/', c.listProducts);
 router.get('/:id', c.getProduct);
 router.post('/', c.createProduct);
 router.put('/:id', c.updateProduct);
-router.patch('/:id/price', requireAdmin, c.updatePrice); // only admins set the price
+router.patch('/:id/price', requireAdmin, c.updatePrice);  // only admins set the price
+router.patch('/:id/active', requireAdmin, c.setProductActive); // deactivate/reactivate (admin)
 
 module.exports = router;
