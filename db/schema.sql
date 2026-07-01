@@ -280,6 +280,17 @@ CREATE TABLE quotation_items (
 
 
 -- ----------------------------------------------------------------------------
+-- 12c. IDEMPOTENCY KEYS  (safe retries for sales/returns on flaky networks)
+-- ----------------------------------------------------------------------------
+CREATE TABLE idempotency_keys (
+    key        VARCHAR(100) PRIMARY KEY,
+    endpoint   VARCHAR(40),
+    response   JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- ----------------------------------------------------------------------------
 -- 13. AUDIT_LOG
 --    Security trail: who did what, when, from where. Helps pass security
 --    reviews and makes the system accountable.

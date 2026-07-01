@@ -8,6 +8,7 @@
 // ============================================================
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
+const idempotency = require('../utils/idempotency');
 
 // POST /api/returns  { sale_id, product_id, quantity, branch_id?, unit_price? }
 // branch_id defaults to the branch the sale was made from.
@@ -18,6 +19,15 @@ async function createReturn(req, res, next) {
 
   if (!sale_id || !product_id) return res.status(400).json({ error: 'Choose a sale and a product.' });
   if (!qty || qty <= 0) return res.status(400).json({ error: 'Enter a quantity greater than 0.' });
+
+  const idemKey = req.get('Idempotency-Key');
+  try {
+    const gate = await idempotency.begin(idemKey, 'return');
+    if (!gate.proceed) {
+      if (gate.replay) return res.status(201).json(gate.replay);
+      return res.status(409).json({ error: 'This return is already being processed. Please wait a moment.' });
+    }
+  } catch (e) { /* continue if the check itself errors */ }
 
   try {
     const result = await withTransaction(async (client) => {
@@ -100,8 +110,11 @@ async function createReturn(req, res, next) {
       entity: 'return', entityId: result.return_id,
       details: { sale_id, product_id, quantity: qty }, ip: req.ip,
     });
-    res.status(201).json({ message: 'Return recorded. Stock added back.', ...result });
+    const payload = { message: 'Return recorded. Stock added back.', ...result };
+    await idempotency.finish(idemKey, payload);
+    res.status(201).json(payload);
   } catch (err) {
+    await idempotency.fail(idemKey);
     next(err);
   }
 }

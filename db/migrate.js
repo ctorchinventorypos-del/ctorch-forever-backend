@@ -50,6 +50,16 @@ const STATEMENTS = [
   `ALTER TABLE quotations ADD CONSTRAINT quotations_status_check
      CHECK (status IN ('open','converted','superseded'))`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_root ON quotations(root_id, revision)`,
+
+  // Idempotency keys: lets a sale/return be retried safely on a flaky
+  // connection without creating a duplicate. The original response is stored
+  // and replayed if the same key is seen again.
+  `CREATE TABLE IF NOT EXISTS idempotency_keys (
+     key        VARCHAR(100) PRIMARY KEY,
+     endpoint   VARCHAR(40),
+     response   JSONB,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
 ];
 
 async function runMigrations() {
