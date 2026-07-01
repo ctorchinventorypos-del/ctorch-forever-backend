@@ -10,7 +10,7 @@ const { logAction } = require('../utils/audit');
 async function createPayment(req, res, next) {
   const { customer_id, sale_id, note } = req.body;
   const amount = Number(req.body.amount);
-  const VALID_METHODS = ['cash', 'transfer', 'pos'];
+  const VALID_METHODS = ['cash', 'transfer', 'pos', 'cheque'];
   const paymentMethod = VALID_METHODS.includes(req.body.payment_method)
     ? req.body.payment_method : 'cash';
 

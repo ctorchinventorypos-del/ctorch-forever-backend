@@ -262,7 +262,9 @@ CREATE TABLE quotations (
     total_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,
     note           TEXT,
     status         VARCHAR(20)  NOT NULL DEFAULT 'open'
-                     CHECK (status IN ('open','converted')),
+                     CHECK (status IN ('open','converted','superseded')),
+    root_id        INT,                       -- the original quote this revises
+    revision       INT          NOT NULL DEFAULT 1,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
@@ -310,6 +312,7 @@ CREATE INDEX idx_movements_company_date ON stock_movements(company_id, created_a
 CREATE INDEX idx_customers_company_type ON customers(company_id, customer_type);
 CREATE INDEX idx_returns_company_date  ON returns(company_id, created_at);
 CREATE INDEX idx_quotations_company_date ON quotations(company_id, created_at);
+CREATE INDEX idx_quotations_root ON quotations(root_id, revision);
 
 
 -- ----------------------------------------------------------------------------

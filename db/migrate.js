@@ -39,13 +39,24 @@ const STATEMENTS = [
      subtotal       NUMERIC(14,2) NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS idx_quotations_company_date ON quotations(company_id, created_at)`,
+
+  // Quotation revisions: each edit is a new version under the same root quote.
+  `ALTER TABLE quotations ADD COLUMN IF NOT EXISTS root_id INT`,
+  `ALTER TABLE quotations ADD COLUMN IF NOT EXISTS revision INT NOT NULL DEFAULT 1`,
+  // Existing rows are their own root.
+  `UPDATE quotations SET root_id = id WHERE root_id IS NULL`,
+  // Allow a third status: 'superseded' (an older revision that was edited).
+  `ALTER TABLE quotations DROP CONSTRAINT IF EXISTS quotations_status_check`,
+  `ALTER TABLE quotations ADD CONSTRAINT quotations_status_check
+     CHECK (status IN ('open','converted','superseded'))`,
+  `CREATE INDEX IF NOT EXISTS idx_quotations_root ON quotations(root_id, revision)`,
 ];
 
 async function runMigrations() {
   for (const sql of STATEMENTS) {
     await query(sql);
   }
-  console.log('Migrations OK (reorder_level, payment_method, quotations).');
+  console.log('Migrations OK (reorder_level, payment_method, quotations + revisions).');
 }
 
 module.exports = { runMigrations };

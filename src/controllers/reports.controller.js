@@ -277,6 +277,59 @@ async function debtors(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/daily-cash?date=YYYY-MM-DD
+// A day's money-in: every payment received that day (both money collected on
+// sales and separate credit/reseller payments), totalled by method.
+async function dailyCash(req, res, next) {
+  try {
+    const cid = req.company.id;
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+
+    // Money collected at the point of sale (the amount_paid portion).
+    const salesRows = await query(
+      `SELECT s.id, s.invoice_number, s.payment_method, s.amount_paid AS amount, s.created_at,
+              cu.name AS customer_name, u.full_name AS received_by
+       FROM sales s
+       LEFT JOIN customers cu ON cu.id = s.customer_id
+       JOIN users u ON u.id = s.user_id
+       WHERE s.company_id = $1 AND s.created_at::date = $2::date AND s.amount_paid > 0
+       ORDER BY s.created_at`,
+      [cid, date]
+    );
+
+    // Separate payments made against outstanding balances that day.
+    const payRows = await query(
+      `SELECT p.id, p.payment_method, p.amount, p.created_at,
+              cu.name AS customer_name, u.full_name AS received_by
+       FROM payments p
+       LEFT JOIN customers cu ON cu.id = p.customer_id
+       JOIN users u ON u.id = p.user_id
+       WHERE p.company_id = $1 AND p.created_at::date = $2::date
+       ORDER BY p.created_at`,
+      [cid, date]
+    );
+
+    const methods = { cash: 0, transfer: 0, pos: 0, cheque: 0 };
+    const list = [];
+    salesRows.rows.forEach((r) => {
+      const m = methods[r.payment_method] !== undefined ? r.payment_method : 'cash';
+      methods[m] += Number(r.amount);
+      list.push({ kind: 'Sale', ref: r.invoice_number, method: m, amount: Number(r.amount),
+        customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+    });
+    payRows.rows.forEach((r) => {
+      const m = methods[r.payment_method] !== undefined ? r.payment_method : 'cash';
+      methods[m] += Number(r.amount);
+      list.push({ kind: 'Payment', ref: '—', method: m, amount: Number(r.amount),
+        customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+    });
+    list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    const total = methods.cash + methods.transfer + methods.pos + methods.cheque;
+    res.json({ date, methods, total, count: list.length, list });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash,
 };

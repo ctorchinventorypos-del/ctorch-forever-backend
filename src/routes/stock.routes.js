@@ -17,5 +17,6 @@ router.get('/', c.branchStock);
 router.get('/movements', c.movements);
 router.post('/restock', c.restock);
 router.post('/transfer', c.transfer);
+router.post('/transfer-batch', c.transferBatch); // move several products at once
 
 module.exports = router;

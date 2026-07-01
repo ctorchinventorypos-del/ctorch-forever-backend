@@ -64,7 +64,7 @@ async function getCustomer(req, res, next) {
   }
 }
 
-// POST /api/customers  { customer_type, name, phone, address }
+// POST /api/customers  { customer_type, name, phone, address, opening_balance? }
 async function createCustomer(req, res, next) {
   try {
     const name = (req.body.name || '').trim();
@@ -73,17 +73,48 @@ async function createCustomer(req, res, next) {
     if (!['credit', 'reseller'].includes(type)) {
       return res.status(400).json({ error: 'Choose credit customer or bulk reseller.' });
     }
+    // Optional amount already owed at the time of registering (e.g. a reseller
+    // who already has an outstanding balance). Never negative.
+    let opening = Number(req.body.opening_balance);
+    if (!opening || isNaN(opening) || opening < 0) opening = 0;
 
     const { rows } = await query(
-      `INSERT INTO customers (company_id, customer_type, name, phone, address)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.company.id, type, name, req.body.phone || null, req.body.address || null]
+      `INSERT INTO customers (company_id, customer_type, name, phone, address, balance_owed)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.company.id, type, name, req.body.phone || null, req.body.address || null, opening]
     );
     await logAction({
       userId: req.user.id, action: 'create_customer',
-      entity: 'customer', entityId: rows[0].id, ip: req.ip,
+      entity: 'customer', entityId: rows[0].id,
+      details: { opening_balance: opening }, ip: req.ip,
     });
     res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /api/customers/:id/balance  { balance_owed }   (ADMIN ONLY)
+// Directly set the amount a customer owes. Used to correct balances or set a
+// reseller's opening balance after registration. The change is audit-logged.
+async function updateBalance(req, res, next) {
+  try {
+    let bal = Number(req.body.balance_owed);
+    if (isNaN(bal) || bal < 0) return res.status(400).json({ error: 'Enter a valid amount (0 or more).' });
+
+    const before = await query('SELECT balance_owed FROM customers WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+    if (!before.rows.length) return res.status(404).json({ error: 'Customer not found.' });
+
+    const { rows } = await query(
+      `UPDATE customers SET balance_owed = $1 WHERE id = $2 AND company_id = $3 RETURNING *`,
+      [bal, req.params.id, req.company.id]
+    );
+    await logAction({
+      userId: req.user.id, action: 'adjust_balance',
+      entity: 'customer', entityId: req.params.id,
+      details: { from: Number(before.rows[0].balance_owed), to: bal }, ip: req.ip,
+    });
+    res.json(rows[0]);
   } catch (err) {
     next(err);
   }
@@ -107,4 +138,4 @@ async function updateCustomer(req, res, next) {
   }
 }
 
-module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer };
+module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer, updateBalance };

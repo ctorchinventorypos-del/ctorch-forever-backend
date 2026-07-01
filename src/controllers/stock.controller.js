@@ -187,4 +187,77 @@ async function movements(req, res, next) {
   }
 }
 
-module.exports = { branchStock, restock, transfer, movements };
+// POST /api/stock/transfer-batch
+// { from_branch_id, to_branch_id, items: [ { product_id, quantity } ] }
+// Moves several products between two branches in ONE atomic transaction:
+// if any single line lacks enough stock, the whole transfer is rolled back.
+async function transferBatch(req, res, next) {
+  const { from_branch_id, to_branch_id } = req.body;
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+
+  if (!from_branch_id || !to_branch_id)
+    return res.status(400).json({ error: 'Choose a source and a destination.' });
+  if (String(from_branch_id) === String(to_branch_id))
+    return res.status(400).json({ error: 'Source and destination must be different.' });
+  if (items.length === 0)
+    return res.status(400).json({ error: 'Add at least one product to transfer.' });
+  if (items.length > 300)
+    return res.status(400).json({ error: 'Too many lines in one transfer (max 300).' });
+
+  try {
+    const result = await withTransaction(async (client) => {
+      const branches = await client.query(
+        'SELECT id FROM branches WHERE id = ANY($1) AND company_id = $2',
+        [[from_branch_id, to_branch_id], req.company.id]
+      );
+      if (branches.rows.length !== 2) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
+
+      let moved = 0;
+      for (const it of items) {
+        const pid = it.product_id;
+        const qty = parseInt(it.quantity, 10);
+        if (!pid || !qty || qty <= 0) { const e = new Error('Each line needs a product and a quantity.'); e.status = 400; throw e; }
+
+        // Confirm product belongs to company (avoids moving another company's item).
+        const prod = await client.query('SELECT name FROM products WHERE id = $1 AND company_id = $2', [pid, req.company.id]);
+        if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+
+        const src = await client.query(
+          'SELECT quantity FROM stock_levels WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
+          [pid, from_branch_id]
+        );
+        const have = src.rows.length ? src.rows[0].quantity : 0;
+        if (have < qty) {
+          const e = new Error(`Not enough "${prod.rows[0].name}" to transfer. Available: ${have}.`);
+          e.status = 400; throw e;
+        }
+
+        await client.query(
+          'UPDATE stock_levels SET quantity = quantity - $1, updated_at = now() WHERE product_id = $2 AND branch_id = $3',
+          [qty, pid, from_branch_id]
+        );
+        await client.query(
+          `INSERT INTO stock_levels (product_id, branch_id, quantity)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (product_id, branch_id)
+           DO UPDATE SET quantity = stock_levels.quantity + EXCLUDED.quantity, updated_at = now()`,
+          [pid, to_branch_id, qty]
+        );
+        await client.query(
+          `INSERT INTO stock_movements
+             (company_id, product_id, from_branch_id, to_branch_id, quantity, movement_type, user_id)
+           VALUES ($1, $2, $3, $4, $5, 'transfer', $6)`,
+          [req.company.id, pid, from_branch_id, to_branch_id, qty, req.user.id]
+        );
+        moved += 1;
+      }
+      return { lines: moved };
+    });
+
+    res.json({ message: `Transferred ${result.lines} product${result.lines === 1 ? '' : 's'}.`, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { branchStock, restock, transfer, transferBatch, movements };

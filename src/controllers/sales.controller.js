@@ -22,7 +22,7 @@ const { logAction } = require('../utils/audit');
 async function createSale(req, res, next) {
   const { branch_id, sale_type, customer_id, items } = req.body;
   let amountPaid = req.body.amount_paid;
-  const VALID_METHODS = ['cash', 'transfer', 'pos'];
+  const VALID_METHODS = ['cash', 'transfer', 'pos', 'cheque'];
   const paymentMethod = VALID_METHODS.includes(req.body.payment_method)
     ? req.body.payment_method : 'cash';
 
@@ -248,4 +248,43 @@ async function listSales(req, res, next) {
   }
 }
 
-module.exports = { createSale, getSale, listSales };
+// GET /api/sales/by-invoice/:invoice
+// Look a sale up by its invoice number so it can be returned. Each item shows
+// how many were sold and how many are still returnable.
+async function getSaleByInvoice(req, res, next) {
+  try {
+    const inv = (req.params.invoice || '').trim();
+    const sale = await query(
+      `SELECT s.id, s.invoice_number, s.sale_type, s.total_amount, s.created_at,
+              s.branch_id, b.name AS branch_name, u.full_name AS sold_by,
+              cu.name AS customer_name, cu.customer_type
+       FROM sales s
+       JOIN branches b ON b.id = s.branch_id
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN customers cu ON cu.id = s.customer_id
+       WHERE UPPER(s.invoice_number) = UPPER($1) AND s.company_id = $2`,
+      [inv, req.company.id]
+    );
+    if (!sale.rows.length) return res.status(404).json({ error: 'No sale found with that invoice number.' });
+    const s = sale.rows[0];
+
+    const items = await query(
+      `SELECT si.product_id, si.quantity, si.unit_price, si.subtotal,
+              p.name, p.product_code,
+              COALESCE((SELECT SUM(r.quantity) FROM returns r
+                        WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id), 0)::int AS returned
+       FROM sale_items si
+       JOIN products p ON p.id = si.product_id
+       WHERE si.sale_id = $1`,
+      [s.id]
+    );
+    res.json({
+      ...s,
+      items: items.rows.map((it) => ({ ...it, remaining: it.quantity - it.returned })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createSale, getSale, listSales, getSaleByInvoice };

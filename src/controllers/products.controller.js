@@ -83,49 +83,56 @@ async function getProduct(req, res, next) {
 // { product_code, name, category_id, unit, cost_price, recommended_price,
 //   description, initial_branch_id, initial_quantity }
 // Optionally drops some starting stock at a branch in the same step.
-async function createProduct(req, res, next) {
-  const {
-    product_code, name, category_id, unit, cost_price, recommended_price,
-    description, initial_branch_id, initial_quantity, reorder_level,
-  } = req.body;
+// Insert ONE product (+ its starting stock) using an existing transaction
+// client. The starting location is required. Returns the created product row.
+async function insertOneProduct(client, companyId, userId, d) {
+  const inserted = await client.query(
+    `INSERT INTO products
+       (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING *`,
+    [
+      companyId, d.category_id || null, d.product_code.trim(), d.name.trim(),
+      d.description || null, d.unit || 'pcs', d.cost_price || 0, d.recommended_price || 0,
+      (d.reorder_level === undefined || d.reorder_level === null || d.reorder_level === '')
+        ? 5 : parseInt(d.reorder_level, 10) || 0,
+    ]
+  );
+  const p = inserted.rows[0];
 
-  if (!product_code || !product_code.trim())
-    return res.status(400).json({ error: 'Enter a product code.' });
-  if (!name || !name.trim())
-    return res.status(400).json({ error: 'Enter a product name.' });
+  const qty = parseInt(d.initial_quantity, 10) || 0;
+  await client.query(
+    `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)`,
+    [p.id, d.initial_branch_id, qty]
+  );
+  if (qty > 0) {
+    await client.query(
+      `INSERT INTO stock_movements
+         (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
+       VALUES ($1, $2, $3, $4, 'restock', 'Initial stock on product creation', $5)`,
+      [companyId, p.id, d.initial_branch_id, qty, userId]
+    );
+  }
+  return p;
+}
+
+// Basic per-product field checks shared by single + batch create.
+function checkProductInput(d) {
+  if (!d || !d.product_code || !String(d.product_code).trim()) return 'Enter a product code.';
+  if (!d.name || !String(d.name).trim()) return 'Enter a product name.';
+  if (!d.initial_branch_id) return 'Choose the starting stock location.';
+  return null;
+}
+
+// POST /api/products   (single product)
+async function createProduct(req, res, next) {
+  const problem = checkProductInput(req.body);
+  if (problem) return res.status(400).json({ error: problem });
 
   try {
-    const product = await withTransaction(async (client) => {
-      const inserted = await client.query(
-        `INSERT INTO products
-           (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *`,
-        [
-          req.company.id, category_id || null, product_code.trim(), name.trim(),
-          description || null, unit || 'pcs', cost_price || 0, recommended_price || 0,
-          (reorder_level === undefined || reorder_level === null || reorder_level === '')
-            ? 5 : parseInt(reorder_level, 10) || 0,
-        ]
-      );
-      const p = inserted.rows[0];
-
-      const qty = parseInt(initial_quantity, 10) || 0;
-      if (qty > 0 && initial_branch_id) {
-        await client.query(
-          `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)`,
-          [p.id, initial_branch_id, qty]
-        );
-        await client.query(
-          `INSERT INTO stock_movements
-             (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
-           VALUES ($1, $2, $3, $4, 'restock', 'Initial stock on product creation', $5)`,
-          [req.company.id, p.id, initial_branch_id, qty, req.user.id]
-        );
-      }
-      return p;
-    });
-
+    const product = await withTransaction((client) =>
+      insertOneProduct(client, req.company.id, req.user.id, req.body)
+    );
     await logAction({
       userId: req.user.id, action: 'create_product',
       entity: 'product', entityId: product.id, ip: req.ip,
@@ -136,6 +143,45 @@ async function createProduct(req, res, next) {
       return res.status(409).json({
         error: 'A product with that code already exists. Use Restock to add to it instead.',
       });
+    }
+    next(err);
+  }
+}
+
+// POST /api/products/batch   { products: [ {...}, {...} ] }
+// Create several products at once — used for variations of one item, where
+// each variation has its OWN product code. All-or-nothing: if any line is
+// invalid or its code already exists, nothing is created.
+async function createProductsBatch(req, res, next) {
+  const list = Array.isArray(req.body.products) ? req.body.products : [];
+  if (list.length === 0) return res.status(400).json({ error: 'Add at least one variation.' });
+  if (list.length > 100) return res.status(400).json({ error: 'Too many variations at once (max 100).' });
+
+  for (const d of list) {
+    const problem = checkProductInput(d);
+    if (problem) return res.status(400).json({ error: problem });
+  }
+  // Guard against duplicate codes within the same submission.
+  const codes = list.map((d) => String(d.product_code).trim().toLowerCase());
+  if (new Set(codes).size !== codes.length) {
+    return res.status(400).json({ error: 'Two variations have the same product code.' });
+  }
+
+  try {
+    const created = await withTransaction(async (client) => {
+      const out = [];
+      for (const d of list) out.push(await insertOneProduct(client, req.company.id, req.user.id, d));
+      return out;
+    });
+    await logAction({
+      userId: req.user.id, action: 'create_products_batch',
+      entity: 'product', entityId: created[0].id,
+      details: { count: created.length }, ip: req.ip,
+    });
+    res.status(201).json({ message: `${created.length} product${created.length === 1 ? '' : 's'} created.`, products: created });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'One of the product codes already exists. Nothing was created.' });
     }
     next(err);
   }
@@ -232,4 +278,4 @@ async function setProductActive(req, res, next) {
   }
 }
 
-module.exports = { listProducts, getProduct, createProduct, updateProduct, updatePrice, setProductActive };
+module.exports = { listProducts, getProduct, createProduct, createProductsBatch, updateProduct, updatePrice, setProductActive };

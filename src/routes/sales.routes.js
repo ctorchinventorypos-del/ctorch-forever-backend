@@ -14,6 +14,7 @@ router.use(authenticate, resolveCompany);
 
 router.post('/', c.createSale);
 router.get('/', c.listSales);
+router.get('/by-invoice/:invoice', c.getSaleByInvoice); // return-by-receipt lookup
 router.get('/:id', c.getSale);
 
 module.exports = router;

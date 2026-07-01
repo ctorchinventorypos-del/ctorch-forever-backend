@@ -23,5 +23,6 @@ router.get('/sales-summary', c.salesSummary);
 router.get('/branch-performance', c.branchPerformance);
 router.get('/inventory', c.inventory);
 router.get('/debtors', c.debtors);
+router.get('/daily-cash', c.dailyCash);
 
 module.exports = router;
