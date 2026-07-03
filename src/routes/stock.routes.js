@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const { resolveCompany } = require('../middleware/company');
+const { requireAdmin } = require('../middleware/roles');
 const c = require('../controllers/stock.controller');
 
 router.use(authenticate, resolveCompany);
@@ -18,5 +19,6 @@ router.get('/movements', c.movements);
 router.post('/restock', c.restock);
 router.post('/transfer', c.transfer);
 router.post('/transfer-batch', c.transferBatch); // move several products at once
+router.post('/adjust', requireAdmin, c.adjust);  // set exact stock (admin only)
 
 module.exports = router;

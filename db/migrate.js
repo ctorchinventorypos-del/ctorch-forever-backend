@@ -10,6 +10,8 @@ const { query } = require('../src/config/db');
 const STATEMENTS = [
   // Low-stock threshold per product (used by the inventory report / reminders).
   `ALTER TABLE products  ADD COLUMN IF NOT EXISTS reorder_level INT NOT NULL DEFAULT 5`,
+  // Who created the product (for the product-creation record).
+  `ALTER TABLE products  ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id)`,
 
   // How the money came in (cash / transfer / POS card).
   `ALTER TABLE sales     ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'cash'`,

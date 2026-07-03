@@ -4,6 +4,7 @@
 //  write a row to stock_movements, so there's a full paper trail.
 // ============================================================
 const { query, withTransaction } = require('../config/db');
+const { logAction } = require('../utils/audit');
 
 // GET /api/stock?branch_id=...
 // Every product with how many sit at this one branch/warehouse.
@@ -260,4 +261,58 @@ async function transferBatch(req, res, next) {
   }
 }
 
-module.exports = { branchStock, restock, transfer, transferBatch, movements };
+// POST /api/stock/adjust   (ADMIN ONLY)
+// { product_id, branch_id, new_quantity, note? }
+// Directly SET a product's stock at a branch to the correct number. Records
+// the change (with who did it and the difference) as an 'adjustment' movement.
+async function adjust(req, res, next) {
+  const { product_id, branch_id, note } = req.body;
+  const newQty = parseInt(req.body.new_quantity, 10);
+
+  if (!product_id || !branch_id) return res.status(400).json({ error: 'Choose a product and a location.' });
+  if (isNaN(newQty) || newQty < 0) return res.status(400).json({ error: 'Enter a valid quantity (0 or more).' });
+
+  try {
+    const result = await withTransaction(async (client) => {
+      const prod = await client.query('SELECT name FROM products WHERE id = $1 AND company_id = $2', [product_id, req.company.id]);
+      if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+      const br = await client.query('SELECT id FROM branches WHERE id = $1 AND company_id = $2', [branch_id, req.company.id]);
+      if (!br.rows.length) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
+
+      const cur = await client.query(
+        'SELECT quantity FROM stock_levels WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
+        [product_id, branch_id]
+      );
+      const before = cur.rows.length ? cur.rows[0].quantity : 0;
+      const delta = newQty - before;
+
+      await client.query(
+        `INSERT INTO stock_levels (product_id, branch_id, quantity)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (product_id, branch_id)
+         DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = now()`,
+        [product_id, branch_id, newQty]
+      );
+      // Record the change (delta may be positive or negative).
+      await client.query(
+        `INSERT INTO stock_movements
+           (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
+         VALUES ($1, $2, $3, $4, 'adjustment', $5, $6)`,
+        [req.company.id, product_id, branch_id, delta,
+         (note ? note + ' — ' : '') + `set to ${newQty} (was ${before})`, req.user.id]
+      );
+      return { product: prod.rows[0].name, before, after: newQty };
+    });
+
+    await logAction({
+      userId: req.user.id, action: 'adjust_stock',
+      entity: 'product', entityId: product_id,
+      details: result, ip: req.ip,
+    });
+    res.json({ message: `Stock updated: ${result.before} → ${result.after}.`, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { branchStock, restock, transfer, transferBatch, adjust, movements };

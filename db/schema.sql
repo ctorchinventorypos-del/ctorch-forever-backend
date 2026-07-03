@@ -101,6 +101,7 @@ CREATE TABLE products (
     recommended_price  NUMERIC(14,2) NOT NULL DEFAULT 0,
     reorder_level      INT          NOT NULL DEFAULT 5,   -- low-stock threshold
     is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_by         INT          REFERENCES users(id),
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
     UNIQUE (company_id, product_code)                          -- code unique per company

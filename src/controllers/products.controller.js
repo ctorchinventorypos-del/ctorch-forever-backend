@@ -34,12 +34,14 @@ async function listProducts(req, res, next) {
       `SELECT p.id, p.product_code, p.name, p.description, p.unit,
               p.cost_price, p.recommended_price, p.is_active, p.reorder_level,
               p.category_id, c.name AS category_name,
+              p.created_at, u.full_name AS created_by_name,
               COALESCE(SUM(sl.quantity), 0)::int AS total_stock
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN users u ON u.id = p.created_by
        LEFT JOIN stock_levels sl ON sl.product_id = p.id
        ${where}
-       GROUP BY p.id, c.name
+       GROUP BY p.id, c.name, u.full_name
        ORDER BY c.name NULLS LAST, p.name`,
       params
     );
@@ -88,18 +90,21 @@ async function getProduct(req, res, next) {
 async function insertOneProduct(client, companyId, userId, d) {
   const inserted = await client.query(
     `INSERT INTO products
-       (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
     [
       companyId, d.category_id || null, d.product_code.trim(), d.name.trim(),
       d.description || null, d.unit || 'pcs', d.cost_price || 0, d.recommended_price || 0,
       (d.reorder_level === undefined || d.reorder_level === null || d.reorder_level === '')
         ? 5 : parseInt(d.reorder_level, 10) || 0,
+      userId,
     ]
   );
   const p = inserted.rows[0];
 
+  // New products start at 0 stock at their location; an admin sets the real
+  // number afterwards via "Edit stock".
   const qty = parseInt(d.initial_quantity, 10) || 0;
   await client.query(
     `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)`,
