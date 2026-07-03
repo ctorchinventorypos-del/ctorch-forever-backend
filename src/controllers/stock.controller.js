@@ -37,11 +37,17 @@ async function branchStock(req, res, next) {
 async function restock(req, res, next) {
   const { product_code, product_id, branch_id, quantity } = req.body;
   const qty = parseInt(quantity, 10);
+  // Optional new cost price for this batch (only applied for admins).
+  const isAdmin = req.user && req.user.role === 'admin';
+  const newCost = (req.body.cost_price !== undefined && req.body.cost_price !== null && req.body.cost_price !== '')
+    ? Number(req.body.cost_price) : null;
 
   if (!branch_id) return res.status(400).json({ error: 'Choose a branch or warehouse.' });
   if (!qty || qty <= 0) return res.status(400).json({ error: 'Enter a quantity greater than 0.' });
   if (!product_id && !product_code)
     return res.status(400).json({ error: 'Enter a product code.' });
+  if (newCost !== null && (isNaN(newCost) || newCost < 0))
+    return res.status(400).json({ error: 'Enter a valid cost price.' });
 
   try {
     const result = await withTransaction(async (client) => {
@@ -73,11 +79,18 @@ async function restock(req, res, next) {
         [pid, branch_id, qty]
       );
 
+      // If an admin supplied a new cost price for this batch, update it.
+      let costNote = '';
+      if (newCost !== null && isAdmin) {
+        await client.query('UPDATE products SET cost_price = $1, updated_at = now() WHERE id = $2', [newCost, pid]);
+        costNote = ` at cost ${newCost}`;
+      }
+
       await client.query(
         `INSERT INTO stock_movements
-           (company_id, product_id, to_branch_id, quantity, movement_type, user_id)
-         VALUES ($1, $2, $3, $4, 'restock', $5)`,
-        [req.company.id, pid, branch_id, qty, req.user.id]
+           (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
+         VALUES ($1, $2, $3, $4, 'restock', $5, $6)`,
+        [req.company.id, pid, branch_id, qty, ('Restocked' + costNote), req.user.id]
       );
 
       return { product_id: pid, branch_id, new_quantity: upserted.rows[0].quantity };

@@ -199,6 +199,11 @@ async function updateProduct(req, res, next) {
   try {
     const { name, category_id, unit, cost_price, description, reorder_level } = req.body;
 
+    // Only admins may change the cost price. For non-admins it's ignored.
+    const isAdmin = req.user && req.user.role === 'admin';
+    const effectiveCost = (isAdmin && cost_price !== undefined && cost_price !== null && cost_price !== '')
+      ? cost_price : null;
+
     const { rows } = await query(
       `UPDATE products
          SET name          = COALESCE($1, name),
@@ -214,7 +219,7 @@ async function updateProduct(req, res, next) {
         name ? name.trim() : null,
         category_id || null,
         unit || null,
-        cost_price !== undefined && cost_price !== null ? cost_price : null,
+        effectiveCost,
         description || null,
         (reorder_level === undefined || reorder_level === null || reorder_level === '')
           ? null : parseInt(reorder_level, 10),
