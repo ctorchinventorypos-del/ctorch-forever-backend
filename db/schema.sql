@@ -100,6 +100,7 @@ CREATE TABLE products (
     cost_price         NUMERIC(14,2) NOT NULL DEFAULT 0,
     recommended_price  NUMERIC(14,2) NOT NULL DEFAULT 0,
     reorder_level      INT          NOT NULL DEFAULT 5,   -- low-stock threshold
+    qty_per_carton     INT,                                   -- pieces per carton (nullable)
     is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
     created_by         INT          REFERENCES users(id),
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -205,7 +206,9 @@ CREATE TABLE sale_items (
     quantity    INT NOT NULL CHECK (quantity > 0),
     unit_price  NUMERIC(14,2) NOT NULL,              -- price actually sold at
     cost_price  NUMERIC(14,2) NOT NULL DEFAULT 0,    -- snapshot for profit
-    subtotal    NUMERIC(14,2) NOT NULL               -- quantity * unit_price
+    subtotal    NUMERIC(14,2) NOT NULL,              -- quantity * unit_price
+    sold_as     VARCHAR(10) NOT NULL DEFAULT 'piece', -- piece | carton
+    pack_size   INT NOT NULL DEFAULT 1                -- pieces per sold unit
 );
 
 

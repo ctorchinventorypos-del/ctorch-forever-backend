@@ -79,33 +79,46 @@ async function createSale(req, res, next) {
       let total = 0;
       const prepared = [];
       for (const item of items) {
-        const qty = parseInt(item.quantity, 10);
-        const unitPrice = Number(item.unit_price);
-        if (!item.product_id || !qty || qty <= 0 || isNaN(unitPrice) || unitPrice < 0) {
+        const qtyUnits = parseInt(item.quantity, 10);   // in the chosen unit (piece or carton)
+        const unitPrice = Number(item.unit_price);       // price per chosen unit
+        if (!item.product_id || !qtyUnits || qtyUnits <= 0 || isNaN(unitPrice) || unitPrice < 0) {
           const e = new Error('Each item needs a product, a quantity, and a price.');
           e.status = 400; throw e;
         }
         const prod = await client.query(
-          'SELECT id, cost_price, name FROM products WHERE id = $1 AND company_id = $2',
+          'SELECT id, cost_price, name, qty_per_carton FROM products WHERE id = $1 AND company_id = $2',
           [item.product_id, req.company.id]
         );
         if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+
+        // Work out the pack size (pieces per sold unit).
+        const soldAs = item.sold_as === 'carton' ? 'carton' : 'piece';
+        let packSize = 1;
+        if (soldAs === 'carton') {
+          packSize = parseInt(item.pack_size, 10) || parseInt(prod.rows[0].qty_per_carton, 10) || 0;
+          if (!packSize || packSize < 1) {
+            const e = new Error(`${prod.rows[0].name} has no carton size set. Sell by piece or set a carton size first.`);
+            e.status = 400; throw e;
+          }
+        }
+        const pieces = qtyUnits * packSize;             // stock is always counted in pieces
 
         const sl = await client.query(
           'SELECT quantity FROM stock_levels WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
           [item.product_id, branch_id]
         );
         const have = sl.rows.length ? sl.rows[0].quantity : 0;
-        if (have < qty) {
-          const e = new Error(`Not enough stock for ${prod.rows[0].name}. Available: ${have}.`);
+        if (have < pieces) {
+          const e = new Error(`Not enough stock for ${prod.rows[0].name}. Available: ${have} pcs.`);
           e.status = 400; throw e;
         }
 
-        const subtotal = qty * unitPrice;
+        const piecePrice = unitPrice / packSize;         // per-piece price for reports/profit
+        const subtotal = qtyUnits * unitPrice;           // exact line total
         total += subtotal;
         prepared.push({
-          product_id: item.product_id, qty, unitPrice,
-          costPrice: prod.rows[0].cost_price, subtotal,
+          product_id: item.product_id, pieces, piecePrice,
+          costPrice: prod.rows[0].cost_price, subtotal, soldAs, packSize,
         });
       }
 
@@ -138,19 +151,19 @@ async function createSale(req, res, next) {
       // 6. Save items, deduct stock, log the movement.
       for (const p of prepared) {
         await client.query(
-          `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, subtotal)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [saleId, p.product_id, p.qty, p.unitPrice, p.costPrice, p.subtotal]
+          `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, subtotal, sold_as, pack_size)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [saleId, p.product_id, p.pieces, p.piecePrice, p.costPrice, p.subtotal, p.soldAs, p.packSize]
         );
         await client.query(
           'UPDATE stock_levels SET quantity = quantity - $1, updated_at = now() WHERE product_id = $2 AND branch_id = $3',
-          [p.qty, p.product_id, branch_id]
+          [p.pieces, p.product_id, branch_id]
         );
         await client.query(
           `INSERT INTO stock_movements
              (company_id, product_id, from_branch_id, quantity, movement_type, reference_id, user_id)
            VALUES ($1, $2, $3, $4, 'sale', $5, $6)`,
-          [req.company.id, p.product_id, branch_id, p.qty, saleId, req.user.id]
+          [req.company.id, p.product_id, branch_id, p.pieces, saleId, req.user.id]
         );
       }
 
@@ -202,6 +215,7 @@ async function getSale(req, res, next) {
 
     const itemRows = await query(
       `SELECT si.product_id, si.quantity, si.unit_price, si.subtotal,
+              si.sold_as, si.pack_size,
               p.name, p.product_code, p.unit
        FROM sale_items si
        JOIN products p ON p.id = si.product_id

@@ -32,7 +32,7 @@ async function listProducts(req, res, next) {
 
     const { rows } = await query(
       `SELECT p.id, p.product_code, p.name, p.description, p.unit,
-              p.cost_price, p.recommended_price, p.is_active, p.reorder_level,
+              p.cost_price, p.recommended_price, p.is_active, p.reorder_level, p.qty_per_carton,
               p.category_id, c.name AS category_name,
               p.created_at, u.full_name AS created_by_name,
               COALESCE(SUM(sl.quantity), 0)::int AS total_stock
@@ -90,14 +90,16 @@ async function getProduct(req, res, next) {
 async function insertOneProduct(client, companyId, userId, d) {
   const inserted = await client.query(
     `INSERT INTO products
-       (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (company_id, category_id, product_code, name, description, unit, cost_price, recommended_price, reorder_level, qty_per_carton, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       companyId, d.category_id || null, d.product_code.trim(), d.name.trim(),
       d.description || null, d.unit || 'pcs', d.cost_price || 0, d.recommended_price || 0,
       (d.reorder_level === undefined || d.reorder_level === null || d.reorder_level === '')
         ? 5 : parseInt(d.reorder_level, 10) || 0,
+      (d.qty_per_carton === undefined || d.qty_per_carton === null || d.qty_per_carton === '')
+        ? null : parseInt(d.qty_per_carton, 10) || null,
       userId,
     ]
   );
@@ -199,10 +201,13 @@ async function updateProduct(req, res, next) {
   try {
     const { name, category_id, unit, cost_price, description, reorder_level } = req.body;
 
-    // Only admins may change the cost price. For non-admins it's ignored.
+    // Only admins may change the cost price and carton size. For non-admins ignored.
     const isAdmin = req.user && req.user.role === 'admin';
     const effectiveCost = (isAdmin && cost_price !== undefined && cost_price !== null && cost_price !== '')
       ? cost_price : null;
+    const qpc = req.body.qty_per_carton;
+    const effectiveCarton = (isAdmin && qpc !== undefined)
+      ? (qpc === null || qpc === '' ? null : parseInt(qpc, 10) || null) : undefined;
 
     const { rows } = await query(
       `UPDATE products
@@ -212,8 +217,9 @@ async function updateProduct(req, res, next) {
              cost_price    = COALESCE($4, cost_price),
              description   = $5,
              reorder_level = COALESCE($6, reorder_level),
+             qty_per_carton = CASE WHEN $7::int IS NOT NULL OR $8::boolean THEN $9 ELSE qty_per_carton END,
              updated_at    = now()
-       WHERE id = $7 AND company_id = $8
+       WHERE id = $10 AND company_id = $11
        RETURNING *`,
       [
         name ? name.trim() : null,
@@ -223,6 +229,9 @@ async function updateProduct(req, res, next) {
         description || null,
         (reorder_level === undefined || reorder_level === null || reorder_level === '')
           ? null : parseInt(reorder_level, 10),
+        effectiveCarton === undefined ? null : effectiveCarton,
+        effectiveCarton === undefined ? false : true,
+        effectiveCarton === undefined ? null : effectiveCarton,
         req.params.id,
         req.company.id,
       ]

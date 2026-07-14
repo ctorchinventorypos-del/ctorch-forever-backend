@@ -85,6 +85,11 @@ async function restock(req, res, next) {
         await client.query('UPDATE products SET cost_price = $1, updated_at = now() WHERE id = $2', [newCost, pid]);
         costNote = ` at cost ${newCost}`;
       }
+      // Admins may also set/update the carton size here.
+      const qpc = req.body.qty_per_carton;
+      if (isAdmin && qpc !== undefined && qpc !== null && qpc !== '') {
+        await client.query('UPDATE products SET qty_per_carton = $1, updated_at = now() WHERE id = $2', [parseInt(qpc, 10) || null, pid]);
+      }
 
       await client.query(
         `INSERT INTO stock_movements

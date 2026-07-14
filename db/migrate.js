@@ -12,6 +12,11 @@ const STATEMENTS = [
   `ALTER TABLE products  ADD COLUMN IF NOT EXISTS reorder_level INT NOT NULL DEFAULT 5`,
   // Who created the product (for the product-creation record).
   `ALTER TABLE products  ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id)`,
+  // How many pieces are in a carton (nullable; admin-editable).
+  `ALTER TABLE products  ADD COLUMN IF NOT EXISTS qty_per_carton INT`,
+  // How a sale line was sold: by piece or by carton, and the pack size used.
+  `ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS sold_as VARCHAR(10) NOT NULL DEFAULT 'piece'`,
+  `ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS pack_size INT NOT NULL DEFAULT 1`,
 
   // How the money came in (cash / transfer / POS card).
   `ALTER TABLE sales     ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'cash'`,
