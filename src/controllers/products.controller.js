@@ -105,20 +105,39 @@ async function insertOneProduct(client, companyId, userId, d) {
   );
   const p = inserted.rows[0];
 
-  // New products start at 0 stock at their location; an admin sets the real
-  // number afterwards via "Edit stock".
-  const qty = parseInt(d.initial_quantity, 10) || 0;
-  await client.query(
-    `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)`,
-    [p.id, d.initial_branch_id, qty]
-  );
-  if (qty > 0) {
+  // Starting stock. The primary location (initial_branch_id) is always created
+  // (at 0 if no quantity given). Optionally, initial_stock can seed several
+  // branches at once: [{ branch_id, quantity }, ...].
+  const stockByBranch = new Map();
+  // primary location first (may be 0)
+  stockByBranch.set(String(d.initial_branch_id), parseInt(d.initial_quantity, 10) || 0);
+  if (Array.isArray(d.initial_stock)) {
+    for (const s of d.initial_stock) {
+      if (!s || !s.branch_id) continue;
+      const q = parseInt(s.quantity, 10) || 0;
+      // if a branch appears twice, the later (explicit) entry wins
+      stockByBranch.set(String(s.branch_id), q);
+    }
+  }
+
+  for (const [branchId, qty] of stockByBranch.entries()) {
+    // Confirm the branch belongs to this company before seeding stock.
+    const br = await client.query('SELECT id FROM branches WHERE id = $1 AND company_id = $2', [branchId, companyId]);
+    if (!br.rows.length) { const e = new Error('One of the chosen locations was not found.'); e.status = 404; throw e; }
+
     await client.query(
-      `INSERT INTO stock_movements
-         (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
-       VALUES ($1, $2, $3, $4, 'restock', 'Initial stock on product creation', $5)`,
-      [companyId, p.id, d.initial_branch_id, qty, userId]
+      `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)
+       ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = now()`,
+      [p.id, branchId, qty]
     );
+    if (qty > 0) {
+      await client.query(
+        `INSERT INTO stock_movements
+           (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
+         VALUES ($1, $2, $3, $4, 'restock', 'Initial stock on product creation', $5)`,
+        [companyId, p.id, branchId, qty, userId]
+      );
+    }
   }
   return p;
 }
