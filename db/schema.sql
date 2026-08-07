@@ -354,3 +354,16 @@ SELECT id, 'Main Warehouse', TRUE FROM companies WHERE code = 'FOREVER';
 -- DROP TABLE IF EXISTS audit_log, quotation_items, quotations, returns, payments, sale_items, sales,
 --     customers, stock_movements, stock_levels, products, categories,
 --     branches, users, companies CASCADE;
+
+-- ----------------------------------------------------------------------------
+--  LOGIN_EVENTS  (per-user sign-in history: time, IP, device)
+-- ----------------------------------------------------------------------------
+CREATE TABLE login_events (
+    id         SERIAL PRIMARY KEY,
+    user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip         VARCHAR(60),
+    user_agent TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_login_events_user ON login_events(user_id, created_at DESC);
+

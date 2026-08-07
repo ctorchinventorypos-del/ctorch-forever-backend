@@ -67,6 +67,17 @@ const STATEMENTS = [
      response   JSONB,
      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
    )`,
+
+  // Per-user login history: date/time, IP and device (user-agent) of each
+  // successful sign-in, so an admin can review account activity.
+  `CREATE TABLE IF NOT EXISTS login_events (
+     id         SERIAL PRIMARY KEY,
+     user_id    INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     ip         VARCHAR(60),
+     user_agent TEXT,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, created_at DESC)`,
 ];
 
 async function runMigrations() {

@@ -178,6 +178,16 @@ async function createSale(req, res, next) {
         }
       }
 
+      // 8. If this sale came from a quotation, mark that quote converted now
+      //    (only once the sale is actually saved — not at click time).
+      if (req.body.quote_id) {
+        await client.query(
+          `UPDATE quotations SET status = 'converted'
+           WHERE id = $1 AND company_id = $2 AND status <> 'converted'`,
+          [req.body.quote_id, req.company.id]
+        );
+      }
+
       return { id: saleId, invoice_number: invNo, total_amount: total, amount_paid: amountPaid };
     });
 

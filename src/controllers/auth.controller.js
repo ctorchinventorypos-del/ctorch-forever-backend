@@ -56,6 +56,13 @@ async function login(req, res, next) {
         'UPDATE users SET failed_login_attempts = $1, locked_until = $2 WHERE id = $3',
         [attempts, lockUntil, user.id]
       );
+      // Record the failed attempt for security monitoring.
+      try {
+        await logAction({
+          userId: user.id, action: 'login_failed', entity: 'user', entityId: user.id,
+          details: { attempts, locked: !!lockUntil }, ip: req.ip,
+        });
+      } catch (_) { /* non-critical */ }
       return invalid();
     }
 
@@ -85,6 +92,14 @@ async function login(req, res, next) {
       entityId: user.id,
       ip: req.ip,
     });
+
+    // Record device + IP for the per-user login history (best-effort).
+    try {
+      await query(
+        'INSERT INTO login_events (user_id, ip, user_agent) VALUES ($1, $2, $3)',
+        [user.id, req.ip, (req.get('user-agent') || '').slice(0, 500)]
+      );
+    } catch (_) { /* history is non-critical; never block a login on it */ }
 
     res.json({
       token,

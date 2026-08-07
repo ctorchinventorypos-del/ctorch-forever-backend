@@ -45,7 +45,9 @@ async function listProducts(req, res, next) {
        ORDER BY c.name NULLS LAST, p.name`,
       params
     );
-    res.json(rows);
+    // Cost price is admin-only: strip it for everyone else.
+    const isAdmin = req.user && req.user.role === 'admin';
+    res.json(isAdmin ? rows : rows.map((r) => ({ ...r, cost_price: null })));
   } catch (err) {
     next(err);
   }
@@ -75,7 +77,9 @@ async function getProduct(req, res, next) {
       [req.params.id, req.company.id]
     );
 
-    res.json({ ...prod.rows[0], stock_by_branch: breakdown.rows });
+    const isAdmin = req.user && req.user.role === 'admin';
+    const prodOut = isAdmin ? prod.rows[0] : { ...prod.rows[0], cost_price: null };
+    res.json({ ...prodOut, stock_by_branch: breakdown.rows });
   } catch (err) {
     next(err);
   }

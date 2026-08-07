@@ -97,4 +97,17 @@ async function resetPassword(req, res, next) {
   }
 }
 
-module.exports = { listUsers, createUser, updateUser, resetPassword };
+// GET /api/users/:id/logins   (admin) — recent successful logins for one user.
+async function getUserLogins(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT id, ip, user_agent, created_at
+       FROM login_events WHERE user_id = $1
+       ORDER BY created_at DESC LIMIT 100`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+module.exports = { listUsers, createUser, updateUser, resetPassword, getUserLogins };

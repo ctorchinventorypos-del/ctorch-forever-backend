@@ -26,6 +26,7 @@ const sensitiveLimiter = rateLimit({
 router.get('/', c.listUsers);
 router.post('/', sensitiveLimiter, c.createUser);
 router.patch('/:id', c.updateUser);
+router.get('/:id/logins', c.getUserLogins);
 router.post('/:id/password', sensitiveLimiter, c.resetPassword);
 
 module.exports = router;
