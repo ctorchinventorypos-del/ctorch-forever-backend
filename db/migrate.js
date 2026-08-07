@@ -78,6 +78,14 @@ const STATEMENTS = [
      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
    )`,
   `CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, created_at DESC)`,
+
+  // Expand user roles: super_admin, admin, warehouse, sales.
+  `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
+  `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('super_admin','admin','warehouse','sales'))`,
+  // Super admin can exempt an account from the inactivity auto-logout.
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS no_idle_timeout BOOLEAN NOT NULL DEFAULT FALSE`,
+  // The very first user (id=1) is the super admin.
+  `UPDATE users SET role = 'super_admin' WHERE id = 1`,
 ];
 
 async function runMigrations() {

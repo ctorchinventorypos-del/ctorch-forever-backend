@@ -11,7 +11,7 @@ const { logAction } = require('../utils/audit');
 async function listUsers(req, res, next) {
   try {
     const { rows } = await query(
-      `SELECT id, username, full_name, role, is_active, last_login, created_at
+      `SELECT id, username, full_name, role, is_active, no_idle_timeout, locked_until, last_login, created_at
        FROM users ORDER BY created_at`
     );
     res.json(rows);
@@ -25,7 +25,9 @@ async function createUser(req, res, next) {
     const username = (req.body.username || '').trim().toLowerCase();
     const fullName = (req.body.full_name || '').trim();
     const password = req.body.password;
-    const role = req.body.role === 'admin' ? 'admin' : 'sales';
+    let role = ['admin', 'warehouse', 'sales', 'super_admin'].includes(req.body.role) ? req.body.role : 'sales';
+    // Only a super admin can create another super admin.
+    if (role === 'super_admin' && req.user.role !== 'super_admin') role = 'admin';
 
     if (!username) return res.status(400).json({ error: 'Enter a username.' });
     if (!fullName) return res.status(400).json({ error: 'Enter a full name.' });
@@ -52,26 +54,60 @@ async function updateUser(req, res, next) {
   try {
     const id = parseInt(req.params.id, 10);
     const { full_name, role, is_active } = req.body;
+    const VALID = ['super_admin', 'admin', 'warehouse', 'sales'];
 
-    if (id === req.user.id && (is_active === false || (role && role !== 'admin'))) {
-      return res.status(400).json({ error: "You can't disable or demote your own account." });
+    if (id === req.user.id && (is_active === false || (role && role !== req.user.role))) {
+      return res.status(400).json({ error: "You can't disable or change your own role." });
+    }
+    if (role !== undefined && !VALID.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role.' });
+    }
+    // Only a super admin may grant or revoke the super_admin role.
+    if (role !== undefined) {
+      const target = await query('SELECT role FROM users WHERE id = $1', [id]);
+      const targetRole = target.rows[0] && target.rows[0].role;
+      if ((role === 'super_admin' || targetRole === 'super_admin') && req.user.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Only a super admin can assign or change a super admin.' });
+      }
     }
 
     const fields = [];
     const params = [];
     if (full_name !== undefined) { params.push(full_name.trim()); fields.push(`full_name = $${params.length}`); }
-    if (role !== undefined) { params.push(role === 'admin' ? 'admin' : 'sales'); fields.push(`role = $${params.length}`); }
+    if (role !== undefined) { params.push(role); fields.push(`role = $${params.length}`); }
     if (is_active !== undefined) { params.push(!!is_active); fields.push(`is_active = $${params.length}`); }
     if (!fields.length) return res.status(400).json({ error: 'Nothing to update.' });
 
     params.push(id);
     const { rows } = await query(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${params.length}
-       RETURNING id, username, full_name, role, is_active`,
+       RETURNING id, username, full_name, role, is_active, no_idle_timeout`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'User not found.' });
     await logAction({ userId: req.user.id, action: 'update_user', entity: 'user', entityId: id, ip: req.ip });
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /api/users/:id/timeout   (SUPER ADMIN ONLY)
+// Turn the inactivity sign-out on/off for an account, and clear any lockout.
+async function setTimeout(req, res, next) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const off = !!req.body.no_idle_timeout; // true = remove the timeout
+    const { rows } = await query(
+      `UPDATE users SET no_idle_timeout = $1, locked_until = NULL, failed_login_attempts = 0
+       WHERE id = $2 RETURNING id, username, full_name, role, is_active, no_idle_timeout`,
+      [off, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'User not found.' });
+    await logAction({
+      userId: req.user.id, action: 'set_idle_timeout', entity: 'user', entityId: id,
+      details: { no_idle_timeout: off }, ip: req.ip,
+    });
     res.json(rows[0]);
   } catch (err) {
     next(err);
@@ -110,4 +146,4 @@ async function getUserLogins(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { listUsers, createUser, updateUser, resetPassword, getUserLogins };
+module.exports = { listUsers, createUser, updateUser, resetPassword, getUserLogins, setTimeout };

@@ -37,7 +37,8 @@ CREATE TABLE users (
     password_hash         VARCHAR(255) NOT NULL,     -- bcrypt hash, never plain text
     full_name             VARCHAR(120) NOT NULL,
     role                  VARCHAR(20)  NOT NULL DEFAULT 'sales'
-                            CHECK (role IN ('admin', 'sales')),
+                            CHECK (role IN ('super_admin','admin','warehouse','sales')),
+    no_idle_timeout       BOOLEAN      NOT NULL DEFAULT FALSE,
     is_active             BOOLEAN      NOT NULL DEFAULT TRUE,  -- admin can disable access
     failed_login_attempts INT          NOT NULL DEFAULT 0,
     locked_until          TIMESTAMPTZ,                          -- temporary lockout

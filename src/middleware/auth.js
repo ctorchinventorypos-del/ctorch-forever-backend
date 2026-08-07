@@ -25,7 +25,7 @@ async function authenticate(req, res, next) {
 
     // Confirm the account still exists and is still allowed in.
     const { rows } = await query(
-      'SELECT id, username, full_name, role, is_active FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, is_active, no_idle_timeout FROM users WHERE id = $1',
       [payload.id]
     );
     const user = rows[0];
@@ -40,6 +40,7 @@ async function authenticate(req, res, next) {
       username: user.username,
       full_name: user.full_name,
       role: user.role,
+      no_idle_timeout: user.no_idle_timeout,
     };
     next();
   } catch (err) {

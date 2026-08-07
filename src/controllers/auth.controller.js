@@ -108,6 +108,7 @@ async function login(req, res, next) {
         username: user.username,
         full_name: user.full_name,
         role: user.role,
+        no_idle_timeout: user.no_idle_timeout,
       },
     });
   } catch (err) {

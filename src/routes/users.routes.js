@@ -9,7 +9,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-const { requireAdmin } = require('../middleware/roles');
+const { requireAdmin, requireSuperAdmin } = require('../middleware/roles');
 const c = require('../controllers/users.controller');
 
 router.use(authenticate, requireAdmin);
@@ -27,6 +27,7 @@ router.get('/', c.listUsers);
 router.post('/', sensitiveLimiter, c.createUser);
 router.patch('/:id', c.updateUser);
 router.get('/:id/logins', c.getUserLogins);
+router.patch('/:id/timeout', requireSuperAdmin, c.setTimeout);
 router.post('/:id/password', sensitiveLimiter, c.resetPassword);
 
 module.exports = router;
