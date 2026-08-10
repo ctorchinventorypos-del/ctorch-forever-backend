@@ -10,15 +10,16 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
+const { requireStockManager } = require('../middleware/roles');
 const c = require('../controllers/stock.controller');
 
 router.use(authenticate, resolveCompany);
 
 router.get('/', c.branchStock);
 router.get('/movements', c.movements);
-router.post('/restock', c.restock);
-router.post('/transfer', c.transfer);
-router.post('/transfer-batch', c.transferBatch); // move several products at once
+router.post('/restock', requireStockManager, c.restock);
+router.post('/transfer', requireStockManager, c.transfer);
+router.post('/transfer-batch', requireStockManager, c.transferBatch);
 router.post('/adjust', requireAdmin, c.adjust);  // set exact stock (admin only)
 
 module.exports = router;

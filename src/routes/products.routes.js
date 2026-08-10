@@ -17,9 +17,9 @@ router.use(authenticate, resolveCompany);
 
 router.get('/', c.listProducts);
 router.get('/:id', c.getProduct);
-router.post('/', c.createProduct);
-router.post('/batch', c.createProductsBatch); // create variations at once
-router.put('/:id', c.updateProduct);
+router.post('/', requireAdmin, c.createProduct);
+router.post('/batch', requireAdmin, c.createProductsBatch);
+router.put('/:id', requireAdmin, c.updateProduct);
 router.patch('/:id/price', requireAdmin, c.updatePrice);  // only admins set the price
 router.patch('/:id/active', requireAdmin, c.setProductActive); // deactivate/reactivate (admin)
 

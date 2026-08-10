@@ -24,5 +24,6 @@ router.get('/branch-performance', c.branchPerformance);
 router.get('/inventory', c.inventory);
 router.get('/debtors', c.debtors);
 router.get('/daily-cash', c.dailyCash);
+router.get('/account', requireAdmin, c.account);
 
 module.exports = router;

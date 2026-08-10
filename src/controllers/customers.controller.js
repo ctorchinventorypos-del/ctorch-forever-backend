@@ -70,12 +70,11 @@ async function createCustomer(req, res, next) {
     const name = (req.body.name || '').trim();
     const type = req.body.customer_type;
     if (!name) return res.status(400).json({ error: 'Enter a name.' });
-    if (!['credit', 'reseller'].includes(type)) {
-      return res.status(400).json({ error: 'Choose credit customer or bulk reseller.' });
+    if (!['general', 'credit', 'reseller'].includes(type)) {
+      return res.status(400).json({ error: 'Choose a customer type.' });
     }
-    // Optional amount already owed at the time of registering (e.g. a reseller
-    // who already has an outstanding balance). Never negative.
-    let opening = Number(req.body.opening_balance);
+    // Only credit/distributor customers carry a balance.
+    let opening = type === 'general' ? 0 : Number(req.body.opening_balance);
     if (!opening || isNaN(opening) || opening < 0) opening = 0;
 
     const { rows } = await query(

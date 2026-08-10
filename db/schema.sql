@@ -160,7 +160,7 @@ CREATE TABLE customers (
     id             SERIAL PRIMARY KEY,
     company_id     INT          NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     customer_type  VARCHAR(20)  NOT NULL
-                     CHECK (customer_type IN ('credit','reseller')),
+                     CHECK (customer_type IN ('general','credit','reseller')),
     name           VARCHAR(150) NOT NULL,
     phone          VARCHAR(50),
     address        TEXT,

@@ -8,10 +8,11 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/returns.controller');
+const { blockRoles } = require('../middleware/roles');
 
 router.use(authenticate, resolveCompany);
 
-router.post('/', c.createReturn);
+router.post('/', blockRoles('warehouse'), c.createReturn);
 router.get('/', c.listReturns);
 
 module.exports = router;

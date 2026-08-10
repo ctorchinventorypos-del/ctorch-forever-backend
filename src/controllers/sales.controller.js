@@ -23,7 +23,7 @@ const { logAction } = require('../utils/audit');
 async function createSale(req, res, next) {
   const { branch_id, sale_type, customer_id, items } = req.body;
   let amountPaid = req.body.amount_paid;
-  const VALID_METHODS = ['cash', 'transfer', 'pos', 'cheque'];
+  const VALID_METHODS = ['cash', 'pos', 'transfer_moniepoint', 'transfer_zenith', 'cheque'];
   const paymentMethod = VALID_METHODS.includes(req.body.payment_method)
     ? req.body.payment_method : 'cash';
 
@@ -37,8 +37,8 @@ async function createSale(req, res, next) {
   if (items.length > 300) {
     return res.status(400).json({ error: 'Too many items on one sale (max 300).' });
   }
-  if (sale_type !== 'cash' && !customer_id) {
-    return res.status(400).json({ error: 'Choose a customer for a credit or reseller sale.' });
+  if (!customer_id) {
+    return res.status(400).json({ error: 'Choose or create a customer for this sale.' });
   }
 
   const idemKey = req.get('Idempotency-Key');
@@ -59,20 +59,21 @@ async function createSale(req, res, next) {
       );
       if (!br.rows.length) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
 
-      // 2. Customer must exist and match the sale type.
+      // 2. Customer must exist. For credit/distributor sales the type must match;
+      //    cash sales can be to any customer (usually a General/walk-in one).
+      const cust = await client.query(
+        'SELECT id, customer_type FROM customers WHERE id = $1 AND company_id = $2',
+        [customer_id, req.company.id]
+      );
+      if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
       let customer = null;
       if (sale_type !== 'cash') {
-        const cust = await client.query(
-          'SELECT id, customer_type FROM customers WHERE id = $1 AND company_id = $2',
-          [customer_id, req.company.id]
-        );
-        if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
         const expected = sale_type === 'credit' ? 'credit' : 'reseller';
         if (cust.rows[0].customer_type !== expected) {
-          const e = new Error(`That customer is not a ${expected} customer.`);
+          const e = new Error(`That customer is not a ${expected === 'reseller' ? 'distributor' : 'credit'} customer.`);
           e.status = 400; throw e;
         }
-        customer = cust.rows[0];
+        customer = cust.rows[0]; // only credit/distributor affect balance
       }
 
       // 3. Validate every item and check stock (locking each row).

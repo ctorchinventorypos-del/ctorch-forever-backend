@@ -8,10 +8,11 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/payments.controller');
+const { blockRoles } = require('../middleware/roles');
 
 router.use(authenticate, resolveCompany);
 
-router.post('/', c.createPayment);
+router.post('/', blockRoles('warehouse'), c.createPayment);
 router.get('/', c.listPayments);
 router.get('/:id', c.getPayment);
 

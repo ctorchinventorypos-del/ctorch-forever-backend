@@ -9,10 +9,11 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/sales.controller');
+const { blockRoles } = require('../middleware/roles');
 
 router.use(authenticate, resolveCompany);
 
-router.post('/', c.createSale);
+router.post('/', blockRoles('warehouse'), c.createSale); // warehouse users can't sell
 router.get('/', c.listSales);
 router.get('/by-invoice/:invoice', c.getSaleByInvoice); // return-by-receipt lookup
 router.get('/:id', c.getSale);

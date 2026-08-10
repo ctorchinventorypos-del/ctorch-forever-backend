@@ -309,27 +309,68 @@ async function dailyCash(req, res, next) {
       [cid, date]
     );
 
-    const methods = { cash: 0, transfer: 0, pos: 0, cheque: 0 };
+    const methods = {};
+    const bump = (k, v) => { methods[k] = (methods[k] || 0) + Number(v); };
     const list = [];
     salesRows.rows.forEach((r) => {
-      const m = methods[r.payment_method] !== undefined ? r.payment_method : 'cash';
-      methods[m] += Number(r.amount);
+      const m = r.payment_method || 'cash';
+      bump(m, r.amount);
       list.push({ kind: 'Sale', ref: r.invoice_number, method: m, amount: Number(r.amount),
         customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
     });
     payRows.rows.forEach((r) => {
-      const m = methods[r.payment_method] !== undefined ? r.payment_method : 'cash';
-      methods[m] += Number(r.amount);
+      const m = r.payment_method || 'cash';
+      bump(m, r.amount);
       list.push({ kind: 'Payment', ref: '—', method: m, amount: Number(r.amount),
         customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
     });
     list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-    const total = methods.cash + methods.transfer + methods.pos + methods.cheque;
+    const total = Object.values(methods).reduce((s, v) => s + v, 0);
     res.json({ date, methods, total, count: list.length, list });
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/account?group=day|week|month|year&from=&to=
+// Money received per payment method, bucketed by day/week/month/year.
+async function account(req, res, next) {
+  try {
+    const cid = req.company.id;
+    const group = ['day', 'week', 'month', 'year'].includes(req.query.group) ? req.query.group : 'month';
+    const params = [cid];
+    let filter = '';
+    if (req.query.from) { params.push(req.query.from); filter += ` AND ts::date >= $${params.length}::date`; }
+    if (req.query.to) { params.push(req.query.to); filter += ` AND ts::date <= $${params.length}::date`; }
+
+    const { rows } = await query(
+      `WITH money AS (
+         SELECT created_at AS ts, COALESCE(payment_method,'cash') AS method, amount_paid AS amt
+           FROM sales WHERE company_id = $1 AND amount_paid > 0
+         UNION ALL
+         SELECT created_at AS ts, COALESCE(payment_method,'cash') AS method, amount AS amt
+           FROM payments WHERE company_id = $1
+       )
+       SELECT date_trunc('${group}', ts) AS bucket, method, SUM(amt)::numeric AS total
+       FROM money WHERE 1=1 ${filter}
+       GROUP BY bucket, method
+       ORDER BY bucket DESC`,
+      params
+    );
+
+    const map = new Map();
+    const methodsSeen = new Set();
+    rows.forEach((r) => {
+      const key = new Date(r.bucket).toISOString();
+      if (!map.has(key)) map.set(key, { bucket: r.bucket, methods: {}, total: 0 });
+      const b = map.get(key);
+      b.methods[r.method] = Number(r.total);
+      b.total += Number(r.total);
+      methodsSeen.add(r.method);
+    });
+    res.json({ group, methods: [...methodsSeen], buckets: [...map.values()] });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account,
 };

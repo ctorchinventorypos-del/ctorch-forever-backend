@@ -86,6 +86,10 @@ const STATEMENTS = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS no_idle_timeout BOOLEAN NOT NULL DEFAULT FALSE`,
   // The very first user (id=1) is the super admin.
   `UPDATE users SET role = 'super_admin' WHERE id = 1`,
+
+  // Add "general" walk-in customers (for cash sales) to the customer types.
+  `ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_customer_type_check`,
+  `ALTER TABLE customers ADD CONSTRAINT customers_customer_type_check CHECK (customer_type IN ('general','credit','reseller'))`,
 ];
 
 async function runMigrations() {
