@@ -160,3 +160,149 @@ async function listReturns(req, res, next) {
 }
 
 module.exports = { createReturn, listReturns };
+
+// ============================================================
+//  Customer-based returns (reworked flow).
+// ============================================================
+
+// POST /api/returns/customer
+// { customer_id, branch_id, items: [{ product_id, quantity, unit_price }], note }
+async function createCustomerReturn(req, res, next) {
+  const { customer_id, branch_id, note } = req.body;
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!customer_id) return res.status(400).json({ error: 'Choose the customer returning the goods.' });
+  if (!branch_id) return res.status(400).json({ error: 'Choose where the goods are returned to.' });
+  if (items.length === 0) return res.status(400).json({ error: 'Add at least one product to return.' });
+
+  const idemKey = req.get('Idempotency-Key');
+  try {
+    const gate = await idempotency.begin(idemKey, 'customer_return');
+    if (!gate.proceed) {
+      if (gate.replay) return res.status(201).json(gate.replay);
+      return res.status(409).json({ error: 'This return is already being processed. Please wait a moment.' });
+    }
+  } catch (_) { /* continue */ }
+
+  try {
+    const result = await withTransaction(async (client) => {
+      const cust = await client.query('SELECT id, customer_type FROM customers WHERE id = $1 AND company_id = $2', [customer_id, req.company.id]);
+      if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
+      const br = await client.query('SELECT id FROM branches WHERE id = $1 AND company_id = $2', [branch_id, req.company.id]);
+      if (!br.rows.length) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
+
+      let total = 0;
+      const prepared = [];
+      for (const it of items) {
+        const qty = parseInt(it.quantity, 10);
+        const price = Number(it.unit_price) || 0;
+        if (!it.product_id || !qty || qty <= 0) { const e = new Error('Each line needs a product and a quantity.'); e.status = 400; throw e; }
+        const prod = await client.query('SELECT id, name FROM products WHERE id = $1 AND company_id = $2', [it.product_id, req.company.id]);
+        if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+        const subtotal = qty * price;
+        total += subtotal;
+        prepared.push({ product_id: it.product_id, qty, price, subtotal });
+      }
+
+      // Header (temporary number first, then a friendly one built from the id).
+      const header = await client.query(
+        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id)
+         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6) RETURNING id`,
+        [req.company.id, customer_id, branch_id, total, note || null, req.user.id]
+      );
+      const returnId = header.rows[0].id;
+      const returnNumber = `${req.company.code}-R${String(returnId).padStart(5, '0')}`;
+      await client.query('UPDATE customer_returns SET return_number = $1 WHERE id = $2', [returnNumber, returnId]);
+
+      for (const p of prepared) {
+        await client.query(
+          `INSERT INTO customer_return_items (return_id, product_id, quantity, unit_price, subtotal)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [returnId, p.product_id, p.qty, p.price, p.subtotal]
+        );
+        // Add the returned stock back to the chosen branch.
+        await client.query(
+          `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)
+           ON CONFLICT (product_id, branch_id)
+           DO UPDATE SET quantity = stock_levels.quantity + EXCLUDED.quantity, updated_at = now()`,
+          [p.product_id, branch_id, p.qty]
+        );
+        await client.query(
+          `INSERT INTO stock_movements (company_id, product_id, to_branch_id, quantity, movement_type, note, user_id)
+           VALUES ($1, $2, $3, $4, 'return', $5, $6)`,
+          [req.company.id, p.product_id, branch_id, p.qty, `Return ${returnNumber}`, req.user.id]
+        );
+      }
+
+      // Credit / distributor: a return reduces what they owe.
+      if (cust.rows[0].customer_type !== 'general' && total > 0) {
+        await client.query(
+          'UPDATE customers SET balance_owed = GREATEST(0, balance_owed - $1) WHERE id = $2',
+          [total, customer_id]
+        );
+      }
+
+      return { id: returnId, return_number: returnNumber, total_amount: total };
+    });
+
+    await logAction({ userId: req.user.id, action: 'customer_return', entity: 'return', entityId: result.id, details: { total: result.total_amount }, ip: req.ip });
+    const payload = { message: 'Return recorded and stock added back.', ...result };
+    await idempotency.finish(idemKey, payload);
+    res.status(201).json(payload);
+  } catch (err) {
+    await idempotency.fail(idemKey);
+    next(err);
+  }
+}
+
+// GET /api/returns/customer  — list for Records
+async function listCustomerReturns(req, res, next) {
+  try {
+    const params = [req.company.id];
+    let filter = '';
+    if (req.query.from) { params.push(req.query.from); filter += ` AND cr.created_at::date >= $${params.length}::date`; }
+    if (req.query.to) { params.push(req.query.to); filter += ` AND cr.created_at::date <= $${params.length}::date`; }
+    const { rows } = await query(
+      `SELECT cr.id, cr.return_number, cr.total_amount, cr.created_at,
+              cu.name AS customer_name, b.name AS branch_name, u.full_name AS processed_by
+       FROM customer_returns cr
+       JOIN customers cu ON cu.id = cr.customer_id
+       JOIN branches b ON b.id = cr.branch_id
+       JOIN users u ON u.id = cr.user_id
+       WHERE cr.company_id = $1 ${filter}
+       ORDER BY cr.created_at DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+// GET /api/returns/customer/:id  — detail for the printable return invoice
+async function getCustomerReturn(req, res, next) {
+  try {
+    const head = await query(
+      `SELECT cr.id, cr.return_number, cr.total_amount, cr.note, cr.created_at,
+              cu.name AS customer_name, cu.phone AS customer_phone,
+              b.name AS branch_name, u.full_name AS processed_by,
+              co.name AS company_name, co.code AS company_code
+       FROM customer_returns cr
+       JOIN customers cu ON cu.id = cr.customer_id
+       JOIN branches b ON b.id = cr.branch_id
+       JOIN users u ON u.id = cr.user_id
+       JOIN companies co ON co.id = cr.company_id
+       WHERE cr.id = $1 AND cr.company_id = $2`,
+      [req.params.id, req.company.id]
+    );
+    if (!head.rows.length) return res.status(404).json({ error: 'Return not found.' });
+    const items = await query(
+      `SELECT cri.product_id, cri.quantity, cri.unit_price, cri.subtotal, p.name, p.product_code
+       FROM customer_return_items cri JOIN products p ON p.id = cri.product_id
+       WHERE cri.return_id = $1`,
+      [req.params.id]
+    );
+    res.json({ ...head.rows[0], items: items.rows });
+  } catch (err) { next(err); }
+}
+
+module.exports.createCustomerReturn = createCustomerReturn;
+module.exports.listCustomerReturns = listCustomerReturns;
+module.exports.getCustomerReturn = getCustomerReturn;

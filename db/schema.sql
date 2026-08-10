@@ -368,3 +368,27 @@ CREATE TABLE login_events (
 );
 CREATE INDEX idx_login_events_user ON login_events(user_id, created_at DESC);
 
+-- ----------------------------------------------------------------------------
+--  CUSTOMER_RETURNS + items (reworked customer-based returns)
+-- ----------------------------------------------------------------------------
+CREATE TABLE customer_returns (
+    id            SERIAL PRIMARY KEY,
+    company_id    INT NOT NULL REFERENCES companies(id),
+    customer_id   INT NOT NULL REFERENCES customers(id),
+    branch_id     INT NOT NULL REFERENCES branches(id),
+    return_number VARCHAR(40),
+    total_amount  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    note          TEXT,
+    user_id       INT NOT NULL REFERENCES users(id),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE customer_return_items (
+    id         SERIAL PRIMARY KEY,
+    return_id  INT NOT NULL REFERENCES customer_returns(id) ON DELETE CASCADE,
+    product_id INT NOT NULL REFERENCES products(id),
+    quantity   INT NOT NULL CHECK (quantity > 0),
+    unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    subtotal   NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_customer_returns_company ON customer_returns(company_id, created_at DESC);
+

@@ -184,9 +184,22 @@ async function movements(req, res, next) {
       params.push(req.query.product_id);
       where += ` AND m.product_id = $${params.length}`;
     }
+    if (req.query.type) {
+      params.push(req.query.type);
+      where += ` AND m.movement_type = $${params.length}`;
+    }
+    if (req.query.from) {
+      params.push(req.query.from);
+      where += ` AND m.created_at::date >= $${params.length}::date`;
+    }
+    if (req.query.to) {
+      params.push(req.query.to);
+      where += ` AND m.created_at::date <= $${params.length}::date`;
+    }
+    const limit = req.query.from || req.query.to ? 2000 : 200;
 
     const { rows } = await query(
-      `SELECT m.id, m.movement_type, m.quantity, m.created_at,
+      `SELECT m.id, m.movement_type, m.quantity, m.created_at, m.note,
               p.name AS product_name, p.product_code,
               fb.name AS from_branch, tb.name AS to_branch,
               u.full_name AS done_by
@@ -197,7 +210,7 @@ async function movements(req, res, next) {
        LEFT JOIN users u ON u.id = m.user_id
        ${where}
        ORDER BY m.created_at DESC
-       LIMIT 200`,
+       LIMIT ${limit}`,
       params
     );
     res.json(rows);

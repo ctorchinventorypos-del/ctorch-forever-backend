@@ -90,6 +90,30 @@ const STATEMENTS = [
   // Add "general" walk-in customers (for cash sales) to the customer types.
   `ALTER TABLE customers DROP CONSTRAINT IF EXISTS customers_customer_type_check`,
   `ALTER TABLE customers ADD CONSTRAINT customers_customer_type_check CHECK (customer_type IN ('general','credit','reseller'))`,
+
+  // Customer-based returns (reworked): a return is made against a customer,
+  // can include several products in partial quantities, adds stock back, and
+  // prints its own return invoice (customer / plaza / warehouse copies).
+  `CREATE TABLE IF NOT EXISTS customer_returns (
+     id            SERIAL PRIMARY KEY,
+     company_id    INT NOT NULL REFERENCES companies(id),
+     customer_id   INT NOT NULL REFERENCES customers(id),
+     branch_id     INT NOT NULL REFERENCES branches(id),
+     return_number VARCHAR(40),
+     total_amount  NUMERIC(14,2) NOT NULL DEFAULT 0,
+     note          TEXT,
+     user_id       INT NOT NULL REFERENCES users(id),
+     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
+  `CREATE TABLE IF NOT EXISTS customer_return_items (
+     id           SERIAL PRIMARY KEY,
+     return_id    INT NOT NULL REFERENCES customer_returns(id) ON DELETE CASCADE,
+     product_id   INT NOT NULL REFERENCES products(id),
+     quantity     INT NOT NULL CHECK (quantity > 0),
+     unit_price   NUMERIC(14,2) NOT NULL DEFAULT 0,
+     subtotal     NUMERIC(14,2) NOT NULL DEFAULT 0
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_customer_returns_company ON customer_returns(company_id, created_at DESC)`,
 ];
 
 async function runMigrations() {

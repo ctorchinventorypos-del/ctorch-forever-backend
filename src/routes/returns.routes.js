@@ -15,4 +15,9 @@ router.use(authenticate, resolveCompany);
 router.post('/', blockRoles('warehouse'), c.createReturn);
 router.get('/', c.listReturns);
 
+// Reworked customer-based returns.
+router.post('/customer', blockRoles('warehouse'), c.createCustomerReturn);
+router.get('/customer', c.listCustomerReturns);
+router.get('/customer/:id', c.getCustomerReturn);
+
 module.exports = router;
