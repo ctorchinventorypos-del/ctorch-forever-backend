@@ -265,9 +265,9 @@ async function debtors(req, res, next) {
                  WHERE s.customer_id = cu.id AND s.amount_paid < s.total_amount) AS oldest_unpaid,
               (SELECT MAX(p.created_at) FROM payments p WHERE p.customer_id = cu.id) AS last_payment
        FROM customers cu
-       WHERE cu.company_id = $1 AND cu.balance_owed > 0
+       WHERE cu.balance_owed > 0
        ORDER BY oldest_unpaid ASC NULLS LAST, cu.balance_owed DESC`,
-      [req.company.id]
+      []
     );
     res.json(rows.map((r) => ({
       id: r.id, name: r.name, phone: r.phone, customer_type: r.customer_type,

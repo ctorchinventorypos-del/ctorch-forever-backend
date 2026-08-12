@@ -62,8 +62,8 @@ async function createSale(req, res, next) {
       // 2. Customer must exist. For credit/distributor sales the type must match;
       //    cash sales can be to any customer (usually a General/walk-in one).
       const cust = await client.query(
-        'SELECT id, customer_type FROM customers WHERE id = $1 AND company_id = $2',
-        [customer_id, req.company.id]
+        'SELECT id, customer_type FROM customers WHERE id = $1',
+        [customer_id]
       );
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
       let customer = null;

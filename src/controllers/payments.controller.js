@@ -21,8 +21,8 @@ async function createPayment(req, res, next) {
     const result = await withTransaction(async (client) => {
       // Lock the customer row so two payments can't race each other.
       const cust = await client.query(
-        'SELECT id, balance_owed FROM customers WHERE id = $1 AND company_id = $2 FOR UPDATE',
-        [customer_id, req.company.id]
+        'SELECT id, balance_owed FROM customers WHERE id = $1 FOR UPDATE',
+        [customer_id]
       );
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
 

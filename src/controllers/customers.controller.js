@@ -11,8 +11,10 @@ const { logAction } = require('../utils/audit');
 // GET /api/customers?type=credit|reseller&search=...
 async function listCustomers(req, res, next) {
   try {
-    const params = [req.company.id];
-    let where = 'WHERE company_id = $1';
+    // Customers are shared across both companies, so the list is NOT filtered
+    // by the active company. Balance is the combined debt across companies.
+    const params = [];
+    let where = 'WHERE 1=1';
 
     if (req.query.type) {
       params.push(req.query.type);
@@ -38,27 +40,41 @@ async function listCustomers(req, res, next) {
 // The customer plus their sales and payment history (their "page").
 async function getCustomer(req, res, next) {
   try {
+    // Customer is shared, so open it regardless of the active company.
     const cust = await query(
       `SELECT cu.*, co.code AS company_code, co.name AS company_name,
               co.address AS company_address, co.phone AS company_phone
        FROM customers cu JOIN companies co ON co.id = cu.company_id
-       WHERE cu.id = $1 AND cu.company_id = $2`,
-      [req.params.id, req.company.id]
+       WHERE cu.id = $1`,
+      [req.params.id]
     );
     if (!cust.rows.length) return res.status(404).json({ error: 'Customer not found.' });
 
+    // History spans BOTH companies; each row is tagged with the company it
+    // happened under, so the statement shows where each debt came from.
     const sales = await query(
-      `SELECT id, invoice_number, sale_type, payment_method, total_amount, amount_paid, created_at
-       FROM sales WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
+      `SELECT s.id, s.invoice_number, s.sale_type, s.payment_method, s.total_amount,
+              s.amount_paid, s.created_at, co.code AS company_code, co.name AS company_name
+       FROM sales s JOIN companies co ON co.id = s.company_id
+       WHERE s.customer_id = $1 ORDER BY s.created_at DESC LIMIT 300`,
       [req.params.id]
     );
     const payments = await query(
-      `SELECT id, amount, payment_method, note, created_at
-       FROM payments WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 200`,
+      `SELECT p.id, p.amount, p.payment_method, p.note, p.created_at,
+              co.code AS company_code, co.name AS company_name
+       FROM payments p JOIN companies co ON co.id = p.company_id
+       WHERE p.customer_id = $1 ORDER BY p.created_at DESC LIMIT 300`,
+      [req.params.id]
+    );
+    const returns = await query(
+      `SELECT cr.id, cr.return_number, cr.total_amount, cr.created_at,
+              co.code AS company_code, co.name AS company_name
+       FROM customer_returns cr JOIN companies co ON co.id = cr.company_id
+       WHERE cr.customer_id = $1 ORDER BY cr.created_at DESC LIMIT 300`,
       [req.params.id]
     );
 
-    res.json({ ...cust.rows[0], sales: sales.rows, payments: payments.rows });
+    res.json({ ...cust.rows[0], sales: sales.rows, payments: payments.rows, returns: returns.rows });
   } catch (err) {
     next(err);
   }
@@ -101,12 +117,12 @@ async function updateBalance(req, res, next) {
     let bal = Number(req.body.balance_owed);
     if (isNaN(bal) || bal < 0) return res.status(400).json({ error: 'Enter a valid amount (0 or more).' });
 
-    const before = await query('SELECT balance_owed FROM customers WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+    const before = await query('SELECT balance_owed FROM customers WHERE id = $1', [req.params.id]);
     if (!before.rows.length) return res.status(404).json({ error: 'Customer not found.' });
 
     const { rows } = await query(
-      `UPDATE customers SET balance_owed = $1 WHERE id = $2 AND company_id = $3 RETURNING *`,
-      [bal, req.params.id, req.company.id]
+      `UPDATE customers SET balance_owed = $1 WHERE id = $2 RETURNING *`,
+      [bal, req.params.id]
     );
     await logAction({
       userId: req.user.id, action: 'adjust_balance',
@@ -127,8 +143,8 @@ async function updateCustomer(req, res, next) {
 
     const { rows } = await query(
       `UPDATE customers SET name = $1, phone = $2, address = $3
-       WHERE id = $4 AND company_id = $5 RETURNING *`,
-      [name, req.body.phone || null, req.body.address || null, req.params.id, req.company.id]
+       WHERE id = $4 RETURNING *`,
+      [name, req.body.phone || null, req.body.address || null, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
     res.json(rows[0]);

@@ -185,7 +185,7 @@ async function createCustomerReturn(req, res, next) {
 
   try {
     const result = await withTransaction(async (client) => {
-      const cust = await client.query('SELECT id, customer_type FROM customers WHERE id = $1 AND company_id = $2', [customer_id, req.company.id]);
+      const cust = await client.query('SELECT id, customer_type FROM customers WHERE id = $1', [customer_id]);
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
       const br = await client.query('SELECT id FROM branches WHERE id = $1 AND company_id = $2', [branch_id, req.company.id]);
       if (!br.rows.length) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
