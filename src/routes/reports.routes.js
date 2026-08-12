@@ -25,5 +25,6 @@ router.get('/inventory', requireAdmin, c.inventory);
 router.get('/debtors', c.debtors);
 router.get('/daily-cash', requireAdmin, c.dailyCash);
 router.get('/account', requireAdmin, c.account);
+router.get('/inventory-detail', c.inventoryDetail);
 
 module.exports = router;

@@ -371,6 +371,48 @@ async function account(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/inventory-detail
+// Every active product with its stock broken out per branch (not summed),
+// plus a total. Used by the detailed "Print inventory" report.
+async function inventoryDetail(req, res, next) {
+  try {
+    const branches = await query(
+      `SELECT id, name, is_warehouse FROM branches WHERE company_id = $1
+       ORDER BY is_warehouse DESC, name`,
+      [req.company.id]
+    );
+    const { rows } = await query(
+      `SELECT p.id, p.product_code, p.name, p.unit, p.recommended_price, p.reorder_level,
+              c.name AS category_name, sl.branch_id, COALESCE(sl.quantity,0)::int AS qty
+       FROM products p
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN stock_levels sl ON sl.product_id = p.id
+       WHERE p.company_id = $1 AND p.is_active = TRUE
+       ORDER BY c.name NULLS LAST, p.name`,
+      [req.company.id]
+    );
+
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.id)) {
+        map.set(r.id, {
+          id: r.id, product_code: r.product_code, name: r.name, unit: r.unit,
+          recommended_price: Number(r.recommended_price),
+          reorder_level: Number(r.reorder_level),
+          category_name: r.category_name || 'Uncategorised',
+          stock: {}, total: 0,
+        });
+      }
+      const p = map.get(r.id);
+      if (r.branch_id != null) {
+        p.stock[r.branch_id] = (p.stock[r.branch_id] || 0) + r.qty;
+        p.total += r.qty;
+      }
+    }
+    res.json({ branches: branches.rows, products: [...map.values()] });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail,
 };
