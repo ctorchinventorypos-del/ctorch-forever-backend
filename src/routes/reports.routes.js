@@ -19,7 +19,7 @@ router.use(authenticate, resolveCompany);
 
 router.get('/dashboard', c.dashboard);
 router.get('/profit', requireAdmin, c.profit);
-router.get('/sales-summary', c.salesSummary);
+router.get('/sales-summary', requireAdmin, c.salesSummary);
 router.get('/branch-performance', requireAdmin, c.branchPerformance);
 router.get('/inventory', requireAdmin, c.inventory);
 router.get('/debtors', c.debtors);
