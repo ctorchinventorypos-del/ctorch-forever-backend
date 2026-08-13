@@ -114,6 +114,10 @@ const STATEMENTS = [
      subtotal     NUMERIC(14,2) NOT NULL DEFAULT 0
    )`,
   `CREATE INDEX IF NOT EXISTS idx_customer_returns_company ON customer_returns(company_id, created_at DESC)`,
+
+  // Link the two per-company sales that make up one cross-company "warehouse sale".
+  `ALTER TABLE sales ADD COLUMN IF NOT EXISTS warehouse_ref VARCHAR(40)`,
+  `CREATE INDEX IF NOT EXISTS idx_sales_warehouse_ref ON sales(warehouse_ref)`,
 ];
 
 async function runMigrations() {

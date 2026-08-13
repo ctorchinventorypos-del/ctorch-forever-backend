@@ -81,6 +81,7 @@ app.use('/api/products', productsRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/warehouse-sale', require('./routes/warehouse.routes'));
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/returns', returnsRoutes);
 app.use('/api/users', usersRoutes);
