@@ -6,6 +6,7 @@
 //   - You can't return more than was sold (minus anything already
 //     returned on that sale).
 // ============================================================
+const { actionDate, editDate } = require('../utils/dates');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 const idempotency = require('../utils/idempotency');
@@ -159,7 +160,19 @@ async function listReturns(req, res, next) {
   }
 }
 
-module.exports = { createReturn, listReturns };
+
+// PATCH /api/returns/customer/:id/date  (admin)
+async function editReturnDate(req, res, next) {
+  try {
+    const when = editDate(req.body.date);
+    const r = await query('UPDATE customer_returns SET created_at = $1 WHERE id = $2 AND company_id = $3 RETURNING id, created_at',
+      [when, req.params.id, req.company.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Return not found.' });
+    res.json({ message: 'Date updated.', ...r.rows[0] });
+  } catch (err) { next(err); }
+}
+
+module.exports = { createReturn, listReturns, editReturnDate };
 
 // ============================================================
 //  Customer-based returns (reworked flow).
@@ -205,9 +218,9 @@ async function createCustomerReturn(req, res, next) {
 
       // Header (temporary number first, then a friendly one built from the id).
       const header = await client.query(
-        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id)
-         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6) RETURNING id`,
-        [req.company.id, customer_id, branch_id, total, note || null, req.user.id]
+        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id, created_at)
+         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6, COALESCE($7::timestamptz, now())) RETURNING id`,
+        [req.company.id, customer_id, branch_id, total, note || null, req.user.id, actionDate(req.body.created_at)]
       );
       const returnId = header.rows[0].id;
       const returnNumber = `${req.company.code}-R${String(returnId).padStart(5, '0')}`;

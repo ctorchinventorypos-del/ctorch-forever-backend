@@ -5,6 +5,7 @@
 //  each company's books and warehouse stock stay correct. The two
 //  sales share a warehouse_ref so one combined invoice can show all.
 // ============================================================
+const { actionDate, editDate } = require('../utils/dates');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 const idempotency = require('../utils/idempotency');
@@ -132,9 +133,9 @@ async function createWarehouseSale(req, res, next) {
         const amountPaid = isCredit ? 0 : total;
 
         const inserted = await client.query(
-          `INSERT INTO sales (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, warehouse_ref)
-           VALUES ($1,$2,$3,$4,$5,$6, md5(random()::text || clock_timestamp()::text), $7,$8,$9) RETURNING id`,
-          [companyId, branchId, req.user.id, customer_id, sale_type, paymentMethod, total, amountPaid, ref]
+          `INSERT INTO sales (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, warehouse_ref, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6, md5(random()::text || clock_timestamp()::text), $7,$8,$9, COALESCE($10::timestamptz, now())) RETURNING id`,
+          [companyId, branchId, req.user.id, customer_id, sale_type, paymentMethod, total, amountPaid, ref, actionDate(req.body.created_at)]
         );
         const saleId = inserted.rows[0].id;
         const invNo = `${co.rows[0].code}-${String(saleId).padStart(6, '0')}`;

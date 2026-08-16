@@ -16,6 +16,7 @@ const c = require('../controllers/products.controller');
 router.use(authenticate, resolveCompany);
 
 router.get('/', c.listProducts);
+router.get('/next-code', c.nextCode);
 router.get('/:id', c.getProduct);
 router.post('/', requireAdmin, c.createProduct);
 router.post('/batch', requireAdmin, c.createProductsBatch);

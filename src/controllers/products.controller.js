@@ -320,4 +320,36 @@ async function setProductActive(req, res, next) {
   }
 }
 
-module.exports = { listProducts, getProduct, createProduct, createProductsBatch, updateProduct, updatePrice, setProductActive };
+
+// GET /api/products/next-code
+// Suggests the next product code by sensing the last one created and
+// incrementing its numeric tail (keeping the prefix and zero-padding).
+// The person can still type a different code when adding a product.
+async function nextCode(req, res, next) {
+  try {
+    const { rows } = await query(
+      'SELECT product_code FROM products WHERE company_id = $1 ORDER BY id DESC LIMIT 1',
+      [req.company.id]
+    );
+    let next = null;
+    if (rows.length) {
+      const m = String(rows[0].product_code).match(/^(.*?)(\d+)\s*$/);
+      if (m) {
+        const width = m[2].length;
+        next = m[1] + String(parseInt(m[2], 10) + 1).padStart(width, '0');
+      }
+    }
+    if (!next) next = (req.company.code || 'P') + '000001';
+    // Make sure it isn't already taken; step forward until free.
+    for (let i = 0; i < 200; i++) {
+      const exists = await query('SELECT 1 FROM products WHERE company_id = $1 AND product_code = $2', [req.company.id, next]);
+      if (!exists.rows.length) break;
+      const m = next.match(/^(.*?)(\d+)\s*$/);
+      if (!m) break;
+      next = m[1] + String(parseInt(m[2], 10) + 1).padStart(m[2].length, '0');
+    }
+    res.json({ next_code: next });
+  } catch (err) { next(err); }
+}
+
+module.exports = { listProducts, getProduct, createProduct, createProductsBatch, updateProduct, updatePrice, setProductActive, nextCode };

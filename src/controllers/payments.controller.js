@@ -3,6 +3,7 @@
 //  Recording a payment lowers their balance_owed, but never below
 //  zero (GREATEST(..., 0) handles overpayment safely).
 // ============================================================
+const { actionDate, editDate } = require('../utils/dates');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 
@@ -27,10 +28,10 @@ async function createPayment(req, res, next) {
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
 
       const pay = await client.query(
-        `INSERT INTO payments (company_id, customer_id, sale_id, amount, payment_method, user_id, note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO payments (company_id, customer_id, sale_id, amount, payment_method, user_id, note, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()))
          RETURNING id, amount, created_at`,
-        [req.company.id, customer_id, sale_id || null, amount, paymentMethod, req.user.id, note || null]
+        [req.company.id, customer_id, sale_id || null, amount, paymentMethod, req.user.id, note || null, actionDate(req.body.created_at)]
       );
 
       // Reduce the balance, clamped at zero.
@@ -121,4 +122,16 @@ async function getPayment(req, res, next) {
   }
 }
 
-module.exports = { createPayment, listPayments, getPayment };
+
+// PATCH /api/payments/:id/date  (admin)
+async function editPaymentDate(req, res, next) {
+  try {
+    const when = editDate(req.body.date);
+    const r = await query('UPDATE payments SET created_at = $1 WHERE id = $2 AND company_id = $3 RETURNING id, created_at',
+      [when, req.params.id, req.company.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Payment not found.' });
+    res.json({ message: 'Date updated.', ...r.rows[0] });
+  } catch (err) { next(err); }
+}
+
+module.exports = { createPayment, listPayments, getPayment, editPaymentDate };

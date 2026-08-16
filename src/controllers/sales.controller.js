@@ -9,6 +9,7 @@
 //   - For credit/reseller sales, the unpaid part is added to the
 //     customer's balance_owed.
 // ============================================================
+const { actionDate, editDate } = require('../utils/dates');
 const { query, withTransaction } = require('../config/db');
 const idempotency = require('../utils/idempotency');
 const { logAction } = require('../utils/audit');
@@ -139,10 +140,10 @@ async function createSale(req, res, next) {
       //    set a friendly invoice number built from the new row's id.
       const inserted = await client.query(
         `INSERT INTO sales
-           (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid)
-         VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8)
+           (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8, COALESCE($9::timestamptz, now()))
          RETURNING id`,
-        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, paymentMethod, total, amountPaid]
+        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, paymentMethod, total, amountPaid, actionDate(req.body.created_at)]
       );
       const saleId = inserted.rows[0].id;
 
@@ -325,4 +326,16 @@ async function getSaleByInvoice(req, res, next) {
   }
 }
 
-module.exports = { createSale, getSale, listSales, getSaleByInvoice };
+
+// PATCH /api/sales/:id/date  (admin) — change the date of a past sale.
+async function editSaleDate(req, res, next) {
+  try {
+    const when = editDate(req.body.date);
+    const r = await query('UPDATE sales SET created_at = $1 WHERE id = $2 AND company_id = $3 RETURNING id, created_at',
+      [when, req.params.id, req.company.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Sale not found.' });
+    res.json({ message: 'Date updated.', ...r.rows[0] });
+  } catch (err) { next(err); }
+}
+
+module.exports = { createSale, getSale, listSales, getSaleByInvoice, editSaleDate };
