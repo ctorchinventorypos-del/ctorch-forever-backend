@@ -23,6 +23,6 @@ router.get('/', c.listQuotations);
 router.get('/:id/history', c.getHistory);
 router.get('/:id', c.getQuotation);
 router.patch('/:id/status', c.setStatus);
-router.delete('/:id', c.deleteQuotation);
+router.delete('/:id', requireAdmin, c.deleteQuotation); // deleting a record = admin
 
 module.exports = router;

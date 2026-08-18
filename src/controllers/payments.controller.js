@@ -4,6 +4,7 @@
 //  zero (GREATEST(..., 0) handles overpayment safely).
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
+const { buildSplits } = require('../utils/payments');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 
@@ -27,11 +28,12 @@ async function createPayment(req, res, next) {
       );
       if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
 
+      const { splits: paySplits, primary: primaryMethod } = buildSplits(req.body.payment_splits, amount, paymentMethod);
       const pay = await client.query(
-        `INSERT INTO payments (company_id, customer_id, sale_id, amount, payment_method, user_id, note, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()))
+        `INSERT INTO payments (company_id, customer_id, sale_id, amount, payment_method, user_id, note, created_at, payment_splits)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()), $9::jsonb)
          RETURNING id, amount, created_at`,
-        [req.company.id, customer_id, sale_id || null, amount, paymentMethod, req.user.id, note || null, actionDate(req.body.created_at)]
+        [req.company.id, customer_id, sale_id || null, amount, primaryMethod, req.user.id, note || null, actionDate(req.body.created_at), paySplits]
       );
 
       // Reduce the balance, clamped at zero.

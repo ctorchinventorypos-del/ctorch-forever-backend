@@ -17,7 +17,7 @@ router.use(authenticate, resolveCompany);
 router.get('/', c.listCustomers);
 router.get('/:id', c.getCustomer);
 router.post('/', c.createCustomer);
-router.put('/:id', c.updateCustomer);
+router.put('/:id', requireAdmin, c.updateCustomer); // editing existing customer = admin
 router.patch('/:id/balance', requireAdmin, c.updateBalance); // set amount owed (admin)
 
 module.exports = router;

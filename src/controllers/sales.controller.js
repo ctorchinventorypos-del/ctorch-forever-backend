@@ -10,6 +10,7 @@
 //     customer's balance_owed.
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
+const { buildSplits } = require('../utils/payments');
 const { query, withTransaction } = require('../config/db');
 const idempotency = require('../utils/idempotency');
 const { logAction } = require('../utils/audit');
@@ -136,14 +137,17 @@ async function createSale(req, res, next) {
         }
       }
 
+      // Optional split across multiple payment methods (must add up to amountPaid).
+      const { splits: paySplits, primary: primaryMethod } = buildSplits(req.body.payment_splits, amountPaid, paymentMethod);
+
       // 5. Insert the sale. A throwaway unique value is used first, then we
       //    set a friendly invoice number built from the new row's id.
       const inserted = await client.query(
         `INSERT INTO sales
-           (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8, COALESCE($9::timestamptz, now()))
+           (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, created_at, payment_splits)
+         VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8, COALESCE($9::timestamptz, now()), $10::jsonb)
          RETURNING id`,
-        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, paymentMethod, total, amountPaid, actionDate(req.body.created_at)]
+        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, primaryMethod, total, amountPaid, actionDate(req.body.created_at), paySplits]
       );
       const saleId = inserted.rows[0].id;
 

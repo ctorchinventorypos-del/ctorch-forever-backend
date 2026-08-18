@@ -287,7 +287,7 @@ async function dailyCash(req, res, next) {
 
     // Money collected at the point of sale (the amount_paid portion).
     const salesRows = await query(
-      `SELECT s.id, s.invoice_number, s.payment_method, s.amount_paid AS amount, s.created_at,
+      `SELECT s.id, s.invoice_number, s.payment_method, s.amount_paid AS amount, s.payment_splits, s.created_at,
               cu.name AS customer_name, u.full_name AS received_by
        FROM sales s
        LEFT JOIN customers cu ON cu.id = s.customer_id
@@ -299,7 +299,7 @@ async function dailyCash(req, res, next) {
 
     // Separate payments made against outstanding balances that day.
     const payRows = await query(
-      `SELECT p.id, p.payment_method, p.amount, p.created_at,
+      `SELECT p.id, p.payment_method, p.amount, p.payment_splits, p.created_at,
               cu.name AS customer_name, u.full_name AS received_by
        FROM payments p
        LEFT JOIN customers cu ON cu.id = p.customer_id
@@ -312,17 +312,24 @@ async function dailyCash(req, res, next) {
     const methods = {};
     const bump = (k, v) => { methods[k] = (methods[k] || 0) + Number(v); };
     const list = [];
+    // Expand a row into one-or-more (method, amount) lines using its splits.
+    const linesFor = (r, fallback) => (Array.isArray(r.payment_splits) && r.payment_splits.length
+      ? r.payment_splits.map((s) => ({ method: s.method, amount: Number(s.amount) }))
+      : [{ method: r.payment_method || 'cash', amount: Number(fallback) }]);
+
     salesRows.rows.forEach((r) => {
-      const m = r.payment_method || 'cash';
-      bump(m, r.amount);
-      list.push({ kind: 'Sale', ref: r.invoice_number, method: m, amount: Number(r.amount),
-        customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+      linesFor(r, r.amount).forEach((ln) => {
+        bump(ln.method, ln.amount);
+        list.push({ kind: 'Sale', ref: r.invoice_number, method: ln.method, amount: ln.amount,
+          customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+      });
     });
     payRows.rows.forEach((r) => {
-      const m = r.payment_method || 'cash';
-      bump(m, r.amount);
-      list.push({ kind: 'Payment', ref: '—', method: m, amount: Number(r.amount),
-        customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+      linesFor(r, r.amount).forEach((ln) => {
+        bump(ln.method, ln.amount);
+        list.push({ kind: 'Payment', ref: '—', method: ln.method, amount: ln.amount,
+          customer_name: r.customer_name, received_by: r.received_by, created_at: r.created_at });
+      });
     });
     list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
@@ -344,11 +351,19 @@ async function account(req, res, next) {
 
     const { rows } = await query(
       `WITH money AS (
-         SELECT created_at AS ts, COALESCE(payment_method,'cash') AS method, amount_paid AS amt
-           FROM sales WHERE company_id = $1 AND amount_paid > 0
+         SELECT s.created_at AS ts,
+                COALESCE(sp->>'method', s.payment_method, 'cash') AS method,
+                COALESCE((sp->>'amount')::numeric, s.amount_paid) AS amt
+           FROM sales s
+           LEFT JOIN LATERAL jsonb_array_elements(s.payment_splits) sp ON TRUE
+          WHERE s.company_id = $1 AND s.amount_paid > 0
          UNION ALL
-         SELECT created_at AS ts, COALESCE(payment_method,'cash') AS method, amount AS amt
-           FROM payments WHERE company_id = $1
+         SELECT p.created_at AS ts,
+                COALESCE(sp->>'method', p.payment_method, 'cash') AS method,
+                COALESCE((sp->>'amount')::numeric, p.amount) AS amt
+           FROM payments p
+           LEFT JOIN LATERAL jsonb_array_elements(p.payment_splits) sp ON TRUE
+          WHERE p.company_id = $1
        )
        SELECT date_trunc('${group}', ts) AS bucket, method, SUM(amt)::numeric AS total
        FROM money WHERE 1=1 ${filter}

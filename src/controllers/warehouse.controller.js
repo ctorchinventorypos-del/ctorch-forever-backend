@@ -6,6 +6,7 @@
 //  sales share a warehouse_ref so one combined invoice can show all.
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
+const { buildSplits } = require('../utils/payments');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 const idempotency = require('../utils/idempotency');

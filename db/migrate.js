@@ -118,6 +118,10 @@ const STATEMENTS = [
   // Link the two per-company sales that make up one cross-company "warehouse sale".
   `ALTER TABLE sales ADD COLUMN IF NOT EXISTS warehouse_ref VARCHAR(40)`,
   `CREATE INDEX IF NOT EXISTS idx_sales_warehouse_ref ON sales(warehouse_ref)`,
+
+  // Multiple payment methods on one sale / payment: [{method, amount}, ...].
+  `ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_splits JSONB`,
+  `ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_splits JSONB`,
 ];
 
 async function runMigrations() {
