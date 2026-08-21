@@ -5,6 +5,7 @@
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
 const { buildSplits } = require('../utils/payments');
+const { can } = require('../utils/permissions');
 const { query, withTransaction } = require('../config/db');
 const { logAction } = require('../utils/audit');
 
@@ -18,6 +19,11 @@ async function createPayment(req, res, next) {
 
   if (!customer_id) return res.status(400).json({ error: 'Choose a customer.' });
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Enter an amount greater than 0.' });
+
+  if (req.body.created_at && !(await can(req.user, 'sale.backdate'))) delete req.body.created_at;
+  if (Array.isArray(req.body.payment_splits) && req.body.payment_splits.length > 1 && !(await can(req.user, 'payment.split'))) {
+    return res.status(403).json({ error: 'You are not allowed to split payments.' });
+  }
 
   try {
     const result = await withTransaction(async (client) => {

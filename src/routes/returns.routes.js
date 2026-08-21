@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/returns.controller');
 const { blockRoles, requireAdmin } = require('../middleware/roles');
@@ -16,8 +17,8 @@ router.post('/', blockRoles('warehouse'), c.createReturn);
 router.get('/', c.listReturns);
 
 // Reworked customer-based returns.
-router.post('/customer', blockRoles('warehouse'), c.createCustomerReturn);
-router.patch('/customer/:id/date', requireAdmin, c.editReturnDate);
+router.post('/customer', requireFeature('return.record'), c.createCustomerReturn);
+router.patch('/customer/:id/date', requireFeature('records.edit_date'), c.editReturnDate);
 router.get('/customer', c.listCustomerReturns);
 router.get('/customer/:id', c.getCustomerReturn);
 

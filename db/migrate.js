@@ -122,6 +122,19 @@ const STATEMENTS = [
   // Multiple payment methods on one sale / payment: [{method, amount}, ...].
   `ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_splits JSONB`,
   `ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_splits JSONB`,
+
+  // Feature toggles: overrides on top of the built-in defaults.
+  // scope_type 'role' (scope_id = 'sales'|'warehouse') or 'user' (scope_id = user id text).
+  `CREATE TABLE IF NOT EXISTS permission_overrides (
+     id          SERIAL PRIMARY KEY,
+     feature_key VARCHAR(60)  NOT NULL,
+     scope_type  VARCHAR(10)  NOT NULL CHECK (scope_type IN ('role','user')),
+     scope_id    VARCHAR(60)  NOT NULL,
+     allowed     BOOLEAN      NOT NULL,
+     updated_by  INT,
+     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+     UNIQUE (feature_key, scope_type, scope_id)
+   )`,
 ];
 
 async function runMigrations() {

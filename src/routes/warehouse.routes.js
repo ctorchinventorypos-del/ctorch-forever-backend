@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const c = require('../controllers/warehouse.controller');
 
 router.use(authenticate);

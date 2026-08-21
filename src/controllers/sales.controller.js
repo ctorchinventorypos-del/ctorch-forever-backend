@@ -11,6 +11,7 @@
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
 const { buildSplits } = require('../utils/payments');
+const { can } = require('../utils/permissions');
 const { query, withTransaction } = require('../config/db');
 const idempotency = require('../utils/idempotency');
 const { logAction } = require('../utils/audit');
@@ -41,6 +42,19 @@ async function createSale(req, res, next) {
   }
   if (!customer_id) {
     return res.status(400).json({ error: 'Choose or create a customer for this sale.' });
+  }
+
+  // Feature gates: which sale types this user may record, and whether they may
+  // back-date or split the payment. Admins pass everything.
+  const typeFeature = sale_type === 'cash' ? 'sale.cash' : sale_type === 'credit' ? 'sale.credit' : 'sale.distributor';
+  if (!(await can(req.user, typeFeature))) {
+    return res.status(403).json({ error: 'You are not allowed to record this type of sale.' });
+  }
+  if (req.body.created_at && !(await can(req.user, 'sale.backdate'))) {
+    delete req.body.created_at; // silently ignore a back-date they can't set
+  }
+  if (Array.isArray(req.body.payment_splits) && req.body.payment_splits.length > 1 && !(await can(req.user, 'payment.split'))) {
+    return res.status(403).json({ error: 'You are not allowed to split payments.' });
   }
 
   const idemKey = req.get('Idempotency-Key');

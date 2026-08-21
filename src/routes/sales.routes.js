@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/sales.controller');
 const { blockRoles, requireAdmin } = require('../middleware/roles');
@@ -14,7 +15,7 @@ const { blockRoles, requireAdmin } = require('../middleware/roles');
 router.use(authenticate, resolveCompany);
 
 router.post('/', blockRoles('warehouse'), c.createSale); // warehouse users can't sell
-router.patch('/:id/date', requireAdmin, c.editSaleDate); // admin: change a past sale's date
+router.patch('/:id/date', requireFeature('records.edit_date'), c.editSaleDate); // admin: change a past sale's date
 router.get('/', c.listSales);
 router.get('/by-invoice/:invoice', c.getSaleByInvoice); // return-by-receipt lookup
 router.get('/:id', c.getSale);

@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const { requireAdmin } = require('../middleware/roles');
 const { resolveCompany } = require('../middleware/company');
 const c = require('../controllers/categories.controller');
@@ -16,8 +17,8 @@ const c = require('../controllers/categories.controller');
 router.use(authenticate, resolveCompany);
 
 router.get('/', c.listCategories);
-router.post('/', requireAdmin, c.createCategory);
-router.put('/:id', requireAdmin, c.updateCategory);
-router.delete('/:id', requireAdmin, c.deleteCategory);
+router.post('/', requireFeature('category.manage'), c.createCategory);
+router.put('/:id', requireFeature('category.manage'), c.updateCategory);
+router.delete('/:id', requireFeature('category.manage'), c.deleteCategory);
 
 module.exports = router;

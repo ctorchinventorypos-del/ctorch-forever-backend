@@ -11,6 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
 const c = require('../controllers/quotations.controller');
@@ -18,11 +19,11 @@ const c = require('../controllers/quotations.controller');
 router.use(authenticate, resolveCompany);
 
 router.post('/', c.createQuotation);
-router.post('/:id/revise', requireAdmin, c.reviseQuotation);  // editing = admin only
+router.post('/:id/revise', requireFeature('quote.revise'), c.reviseQuotation);  // editing = admin only
 router.get('/', c.listQuotations);
 router.get('/:id/history', c.getHistory);
 router.get('/:id', c.getQuotation);
 router.patch('/:id/status', c.setStatus);
-router.delete('/:id', requireAdmin, c.deleteQuotation); // deleting a record = admin
+router.delete('/:id', requireFeature('quote.delete'), c.deleteQuotation); // deleting a record = admin
 
 module.exports = router;

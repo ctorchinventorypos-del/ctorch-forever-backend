@@ -11,6 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { requireFeature } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
 const c = require('../controllers/reports.controller');
@@ -18,13 +19,13 @@ const c = require('../controllers/reports.controller');
 router.use(authenticate, resolveCompany);
 
 router.get('/dashboard', c.dashboard);
-router.get('/profit', requireAdmin, c.profit);
-router.get('/sales-summary', requireAdmin, c.salesSummary);
-router.get('/branch-performance', requireAdmin, c.branchPerformance);
-router.get('/inventory', requireAdmin, c.inventory);
+router.get('/profit', requireFeature('reports.profit'), c.profit);
+router.get('/sales-summary', requireFeature('reports.sales_summary'), c.salesSummary);
+router.get('/branch-performance', requireFeature('reports.branch'), c.branchPerformance);
+router.get('/inventory', requireFeature('reports.inventory'), c.inventory);
 router.get('/debtors', c.debtors);
-router.get('/daily-cash', requireAdmin, c.dailyCash);
-router.get('/account', requireAdmin, c.account);
+router.get('/daily-cash', requireFeature('reports.daily_cash'), c.dailyCash);
+router.get('/account', requireFeature('reports.account'), c.account);
 router.get('/inventory-detail', c.inventoryDetail);
 
 module.exports = router;
