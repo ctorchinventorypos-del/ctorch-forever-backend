@@ -83,6 +83,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/warehouse-sale', require('./routes/warehouse.routes'));
 app.use('/api/permissions', require('./routes/permissions.routes'));
+app.use('/api/expenses', require('./routes/expenses.routes'));
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/returns', returnsRoutes);
 app.use('/api/users', usersRoutes);

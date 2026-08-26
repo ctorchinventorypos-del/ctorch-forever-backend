@@ -65,6 +65,10 @@ const FEATURES = [
   ['records.products_added', 'View products-added records', 'Records', 'view', false, false],
   ['records.edit_date', "Edit a record's date", 'Records', 'action', false, false],
 
+  // Expenses
+  ['expense.record', 'Record a daily expense', 'Expenses', 'action', false, false],
+  ['expense.view', 'View expenses', 'Expenses', 'view', false, false],
+
   // System / Admin
   ['users.manage', 'Manage users', 'System / Admin', 'action', false, false],
   ['branches.manage', 'Manage branches', 'System / Admin', 'action', false, false],

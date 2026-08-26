@@ -135,6 +135,19 @@ const STATEMENTS = [
      updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
      UNIQUE (feature_key, scope_type, scope_id)
    )`,
+
+  // Daily expenses (money out), per company.
+  `CREATE TABLE IF NOT EXISTS expenses (
+     id             SERIAL PRIMARY KEY,
+     company_id     INT           NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+     amount         NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+     category       VARCHAR(80),
+     payment_method VARCHAR(30)   NOT NULL DEFAULT 'cash',
+     note           TEXT,
+     user_id        INT,
+     created_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_company ON expenses(company_id, created_at DESC)`,
 ];
 
 async function runMigrations() {
