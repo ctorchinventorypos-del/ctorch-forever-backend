@@ -19,6 +19,7 @@ const FEATURES = [
 
   // Quotations
   ['quote.create', 'Create sales order', 'Quotations', 'action', true, false],
+  ['quote.combined', 'Create combined (cross-company) sales order', 'Quotations', 'action', true, false],
   ['quote.convert', 'Convert order to sale', 'Quotations', 'action', true, false],
   ['quote.status', 'Change order status', 'Quotations', 'action', true, false],
   ['quote.revise', 'Revise a sales order', 'Quotations', 'action', false, false],

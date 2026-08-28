@@ -148,6 +148,10 @@ const STATEMENTS = [
      created_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
    )`,
   `CREATE INDEX IF NOT EXISTS idx_expenses_company ON expenses(company_id, created_at DESC)`,
+
+  // Combined sales orders: not tied to one company (goods from both).
+  `ALTER TABLE quotations ALTER COLUMN company_id DROP NOT NULL`,
+  `ALTER TABLE quotations ADD COLUMN IF NOT EXISTS is_combined BOOLEAN NOT NULL DEFAULT FALSE`,
 ];
 
 async function runMigrations() {

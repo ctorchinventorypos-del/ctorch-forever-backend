@@ -11,6 +11,7 @@
 //  it is now the record of what was actually sold.
 // ============================================================
 const { query, withTransaction } = require('../config/db');
+const { can } = require('../utils/permissions');
 const { logAction } = require('../utils/audit');
 const { str, capArray } = require('../utils/validate');
 
@@ -55,14 +56,18 @@ async function createQuotation(req, res, next) {
     const note = str(req.body.note, { field: 'Note', max: 1000 });
     if (!note.ok) return res.status(400).json({ error: note.error });
     const { prepared, total } = prepareItems(req.body.items);
+    const isCombined = req.body.is_combined === true;
+    if (isCombined && !(await can(req.user, 'quote.combined'))) {
+      return res.status(403).json({ error: 'You are not allowed to create combined sales orders.' });
+    }
 
     const quote = await withTransaction(async (client) => {
       const inserted = await client.query(
         `INSERT INTO quotations
-           (company_id, user_id, customer_id, customer_name, quote_number, total_amount, note, revision)
-         VALUES ($1,$2,$3,$4, md5(random()::text || clock_timestamp()::text), $5, $6, 1)
+           (company_id, user_id, customer_id, customer_name, quote_number, total_amount, note, revision, is_combined)
+         VALUES ($1,$2,$3,$4, md5(random()::text || clock_timestamp()::text), $5, $6, 1, $7)
          RETURNING id`,
-        [req.company.id, req.user.id, req.body.customer_id || null, nameField.value, total, note.value]
+        [isCombined ? null : req.company.id, req.user.id, req.body.customer_id || null, nameField.value, total, note.value, isCombined]
       );
       const qId = inserted.rows[0].id;
       const qNo = `QUO-${String(qId).padStart(6, '0')}`;
@@ -146,14 +151,14 @@ async function listQuotations(req, res, next) {
     }
     const { rows } = await query(
       `SELECT latest.id, latest.quote_number, latest.total_amount, latest.status,
-              latest.revision, latest.root_id, latest.created_at,
+              latest.revision, latest.root_id, latest.created_at, latest.is_combined,
               COALESCE(cu.name, latest.customer_name) AS customer_name,
               u.full_name AS created_by,
               (SELECT COUNT(*) FROM quotations r WHERE r.root_id = latest.root_id) AS revision_count
        FROM (
          SELECT DISTINCT ON (root_id) *
          FROM quotations
-         WHERE company_id = $1
+         WHERE (company_id = $1 OR is_combined = TRUE)
          ORDER BY root_id, revision DESC
        ) latest
        LEFT JOIN customers cu ON cu.id = latest.customer_id
@@ -171,7 +176,7 @@ async function listQuotations(req, res, next) {
 async function getHistory(req, res, next) {
   try {
     const cur = await query(
-      'SELECT root_id FROM quotations WHERE id = $1 AND company_id = $2',
+      'SELECT root_id FROM quotations WHERE id = $1 AND (company_id = $2 OR is_combined = TRUE)',
       [req.params.id, req.company.id]
     );
     if (!cur.rows.length) return res.status(404).json({ error: 'Quotation not found.' });
@@ -201,8 +206,8 @@ async function getQuotation(req, res, next) {
        FROM quotations q
        LEFT JOIN customers cu ON cu.id = q.customer_id
        LEFT JOIN users u ON u.id = q.user_id
-       JOIN companies co ON co.id = q.company_id
-       WHERE q.id = $1 AND q.company_id = $2`,
+       LEFT JOIN companies co ON co.id = q.company_id
+       WHERE q.id = $1 AND (q.company_id = $2 OR q.is_combined = TRUE)`,
       [req.params.id, req.company.id]
     );
     if (!q.rows.length) return res.status(404).json({ error: 'Quotation not found.' });
@@ -224,7 +229,7 @@ async function setStatus(req, res, next) {
       return res.status(400).json({ error: 'Invalid status.' });
     }
     const { rows } = await query(
-      `UPDATE quotations SET status = $1 WHERE id = $2 AND company_id = $3 RETURNING id, status`,
+      `UPDATE quotations SET status = $1 WHERE id = $2 AND (company_id = $3 OR is_combined = TRUE) RETURNING id, status`,
       [status, req.params.id, req.company.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Quotation not found.' });
@@ -236,11 +241,11 @@ async function setStatus(req, res, next) {
 async function deleteQuotation(req, res, next) {
   try {
     const cur = await query(
-      'SELECT root_id FROM quotations WHERE id = $1 AND company_id = $2',
+      'SELECT root_id FROM quotations WHERE id = $1 AND (company_id = $2 OR is_combined = TRUE)',
       [req.params.id, req.company.id]
     );
     if (!cur.rows.length) return res.status(404).json({ error: 'Quotation not found.' });
-    await query('DELETE FROM quotations WHERE root_id = $1 AND company_id = $2', [cur.rows[0].root_id, req.company.id]);
+    await query('DELETE FROM quotations WHERE root_id = $1 AND (company_id = $2 OR is_combined = TRUE)', [cur.rows[0].root_id, req.company.id]);
     res.json({ message: 'Quotation deleted.' });
   } catch (err) { next(err); }
 }
