@@ -398,11 +398,17 @@ async function inventoryDetail(req, res, next) {
     );
     const { rows } = await query(
       `SELECT p.id, p.product_code, p.name, p.unit, p.recommended_price, p.reorder_level,
-              c.name AS category_name, sl.branch_id, COALESCE(sl.quantity,0)::int AS qty
+              c.name AS category_name, sl.branch_id, COALESCE(sl.quantity,0)::int AS qty,
+              co.code AS owner_code, p.company_id AS owner_company
        FROM products p
+       JOIN companies co ON co.id = p.company_id
        LEFT JOIN categories c ON c.id = p.category_id
        LEFT JOIN stock_levels sl ON sl.product_id = p.id
-       WHERE p.company_id = $1 AND p.is_active = TRUE
+            AND sl.branch_id IN (SELECT id FROM branches WHERE company_id = $1)
+       WHERE p.is_active = TRUE
+         AND (p.company_id = $1
+              OR EXISTS (SELECT 1 FROM stock_levels s3 JOIN branches b3 ON b3.id = s3.branch_id
+                         WHERE s3.product_id = p.id AND b3.company_id = $1 AND s3.quantity > 0))
        ORDER BY c.name NULLS LAST, p.name`,
       [req.company.id]
     );
@@ -415,6 +421,7 @@ async function inventoryDetail(req, res, next) {
           recommended_price: Number(r.recommended_price),
           reorder_level: Number(r.reorder_level),
           category_name: r.category_name || 'Uncategorised',
+          owner_code: r.owner_code, foreign: r.owner_company !== req.company.id,
           stock: {}, total: 0,
         });
       }

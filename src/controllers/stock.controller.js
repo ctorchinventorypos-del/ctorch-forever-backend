@@ -4,6 +4,7 @@
 //  write a row to stock_movements, so there's a full paper trail.
 // ============================================================
 const { query, withTransaction } = require('../config/db');
+const { can } = require('../utils/permissions');
 const { logAction } = require('../utils/audit');
 
 // GET /api/stock?branch_id=...
@@ -13,14 +14,20 @@ async function branchStock(req, res, next) {
     const branchId = req.query.branch_id;
     if (!branchId) return res.status(400).json({ error: 'Choose a branch.' });
 
+    // Show the company's own products PLUS any product from the other company
+    // that has been transferred here (has stock at this branch) — so it can be
+    // sold from here and counts under whoever sells it.
     const { rows } = await query(
-      `SELECT p.id AS product_id, p.product_code, p.name, p.unit,
+      `SELECT p.id AS product_id, p.product_code, p.name, p.unit, p.company_id,
+              co.code AS owner_code,
               c.name AS category_name,
               COALESCE(sl.quantity, 0)::int AS quantity
        FROM products p
+       JOIN companies co ON co.id = p.company_id
        LEFT JOIN categories c ON c.id = p.category_id
        LEFT JOIN stock_levels sl ON sl.product_id = p.id AND sl.branch_id = $1
-       WHERE p.company_id = $2
+       WHERE p.is_active = TRUE
+         AND (p.company_id = $2 OR COALESCE(sl.quantity, 0) > 0)
        ORDER BY c.name NULLS LAST, p.name`,
       [branchId, req.company.id]
     );
@@ -124,14 +131,26 @@ async function transfer(req, res, next) {
 
   try {
     const result = await withTransaction(async (client) => {
-      // Both branches must belong to this company.
+      // Both branches must exist (they may belong to different companies).
       const branches = await client.query(
-        'SELECT id FROM branches WHERE id = ANY($1) AND company_id = $2',
-        [[from_branch_id, to_branch_id], req.company.id]
+        'SELECT id, company_id FROM branches WHERE id = ANY($1)',
+        [[from_branch_id, to_branch_id]]
       );
       if (branches.rows.length !== 2) {
         const e = new Error('Branch not found.');
         e.status = 404; throw e;
+      }
+      // Which company owns the product being moved (for the movement log).
+      const prod = await client.query('SELECT company_id FROM products WHERE id = $1', [product_id]);
+      if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+      const productCompany = prod.rows[0].company_id;
+
+      // Moving across companies needs the cross-company transfer permission.
+      const fromCo = branches.rows.find((b) => String(b.id) === String(from_branch_id))?.company_id;
+      const toCo = branches.rows.find((b) => String(b.id) === String(to_branch_id))?.company_id;
+      const crosses = fromCo !== toCo || productCompany !== fromCo;
+      if (crosses && !(await can(req.user, 'stock.transfer_crosscompany'))) {
+        const e = new Error('You are not allowed to transfer stock across companies.'); e.status = 403; throw e;
       }
 
       // Lock the source row and check there's enough.
@@ -162,7 +181,7 @@ async function transfer(req, res, next) {
         `INSERT INTO stock_movements
            (company_id, product_id, from_branch_id, to_branch_id, quantity, movement_type, user_id)
          VALUES ($1, $2, $3, $4, $5, 'transfer', $6)`,
-        [req.company.id, product_id, from_branch_id, to_branch_id, qty, req.user.id]
+        [productCompany, product_id, from_branch_id, to_branch_id, qty, req.user.id]
       );
 
       return { transferred: qty };
@@ -239,10 +258,15 @@ async function transferBatch(req, res, next) {
   try {
     const result = await withTransaction(async (client) => {
       const branches = await client.query(
-        'SELECT id FROM branches WHERE id = ANY($1) AND company_id = $2',
-        [[from_branch_id, to_branch_id], req.company.id]
+        'SELECT id, company_id FROM branches WHERE id = ANY($1)',
+        [[from_branch_id, to_branch_id]]
       );
       if (branches.rows.length !== 2) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
+      const fromCo = branches.rows.find((b) => String(b.id) === String(from_branch_id))?.company_id;
+      const toCo = branches.rows.find((b) => String(b.id) === String(to_branch_id))?.company_id;
+      if (fromCo !== toCo && !(await can(req.user, 'stock.transfer_crosscompany'))) {
+        const e = new Error('You are not allowed to transfer stock across companies.'); e.status = 403; throw e;
+      }
 
       let moved = 0;
       for (const it of items) {

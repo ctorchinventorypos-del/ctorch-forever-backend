@@ -15,6 +15,7 @@ const c = require('../controllers/branches.controller');
 router.use(authenticate, resolveCompany);
 
 router.get('/', c.listBranches);
+router.get('/all', c.listAllBranches);
 router.post('/', requireFeature('branches.manage'), c.createBranch);
 router.put('/:id', requireFeature('branches.manage'), c.updateBranch);
 

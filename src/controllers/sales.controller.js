@@ -102,9 +102,11 @@ async function createSale(req, res, next) {
           const e = new Error('Each item needs a product, a quantity, and a price.');
           e.status = 400; throw e;
         }
+        // Product can belong to either company (cross-company stock sold from
+        // this branch counts under the selling company).
         const prod = await client.query(
-          'SELECT id, cost_price, name, qty_per_carton FROM products WHERE id = $1 AND company_id = $2',
-          [item.product_id, req.company.id]
+          'SELECT id, cost_price, name, qty_per_carton FROM products WHERE id = $1',
+          [item.product_id]
         );
         if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
 

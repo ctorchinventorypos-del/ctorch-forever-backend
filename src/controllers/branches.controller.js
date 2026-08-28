@@ -77,4 +77,17 @@ async function updateBranch(req, res, next) {
   }
 }
 
-module.exports = { listBranches, createBranch, updateBranch };
+
+// GET /api/branches/all — every branch across BOTH companies (for cross-company transfer).
+async function listAllBranches(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT b.id, b.name, b.is_warehouse, b.company_id, co.code AS company_code, co.name AS company_name
+       FROM branches b JOIN companies co ON co.id = b.company_id
+       ORDER BY co.code, b.is_warehouse DESC, b.name`, []
+    );
+    res.json(rows);
+  } catch (err) { next(err); }
+}
+
+module.exports = { listBranches, createBranch, updateBranch, listAllBranches };

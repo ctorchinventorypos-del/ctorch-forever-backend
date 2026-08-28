@@ -34,6 +34,7 @@ const FEATURES = [
   ['product.active', 'Deactivate / reactivate product', 'Inventory & Products', 'action', false, false],
   ['stock.restock', 'Restock (add stock)', 'Inventory & Products', 'action', false, true],
   ['stock.transfer', 'Transfer stock', 'Inventory & Products', 'action', false, true],
+  ['stock.transfer_crosscompany', 'Transfer stock across companies / to any branch', 'Inventory & Products', 'action', false, true],
   ['stock.adjust', 'Adjust / set exact stock', 'Inventory & Products', 'action', false, false],
   ['category.manage', 'Manage categories', 'Inventory & Products', 'action', false, false],
   ['inventory.print', 'Print inventory', 'Inventory & Products', 'view', true, true],
