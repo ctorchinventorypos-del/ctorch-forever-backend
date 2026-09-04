@@ -15,7 +15,8 @@ const { blockRoles, requireAdmin } = require('../middleware/roles');
 router.use(authenticate, resolveCompany);
 
 router.post('/', blockRoles('warehouse'), c.createSale); // warehouse users can't sell
-router.patch('/:id/date', requireFeature('records.edit_date'), c.editSaleDate); // admin: change a past sale's date
+router.patch('/:id/date', requireFeature('records.edit_date'), c.editSaleDate);
+router.patch('/:id/customer', requireFeature('records.edit_customer'), c.editSaleCustomer); // admin: change a past sale's date
 router.get('/', c.listSales);
 router.get('/by-invoice/:invoice', c.getSaleByInvoice); // return-by-receipt lookup
 router.get('/:id', c.getSale);

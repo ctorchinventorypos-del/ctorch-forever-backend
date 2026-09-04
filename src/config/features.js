@@ -69,6 +69,7 @@ const FEATURES = [
   ['records.stock_changes', 'View stock-change records', 'Records', 'view', false, false],
   ['records.products_added', 'View products-added records', 'Records', 'view', false, false],
   ['records.edit_date', "Edit a record's date", 'Records', 'action', false, false],
+  ['records.edit_customer', 'Set / change the customer on a past sale', 'Records', 'action', false, false],
 
   // Expenses
   ['expense.record', 'Record a daily expense', 'Expenses', 'action', false, false],

@@ -30,7 +30,7 @@ const { errorHandler } = require('./middleware/errorHandler');
 const app = express();
 
 // --- Security & basics ---
-app.use(helmet());                          // sets secure HTTP headers hhhhh
+app.use(helmet());                          // sets secure HTTP headers
 app.use(
   helmet.hsts({ maxAge: 15552000 })         // tell browsers to stick to HTTPS
 );

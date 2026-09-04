@@ -358,4 +358,30 @@ async function editSaleDate(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { createSale, getSale, listSales, getSaleByInvoice, editSaleDate };
+
+// PATCH /api/sales/:id/customer  { customer_id }  (admin) — attribute a past
+// sale to a customer (fixes legacy sales that show no name). Adjusts balances
+// when the sale was on credit so the debt follows the customer.
+async function editSaleCustomer(req, res, next) {
+  try {
+    const newCustomerId = req.body.customer_id;
+    if (!newCustomerId) return res.status(400).json({ error: 'Choose a customer.' });
+    await withTransaction(async (client) => {
+      const sale = await client.query('SELECT id, customer_id, sale_type, total_amount, amount_paid FROM sales WHERE id = $1 AND company_id = $2 FOR UPDATE', [req.params.id, req.company.id]);
+      if (!sale.rows.length) { const e = new Error('Sale not found.'); e.status = 404; throw e; }
+      const s = sale.rows[0];
+      const owed = Number(s.total_amount) - Number(s.amount_paid);
+      const cust = await client.query('SELECT id FROM customers WHERE id = $1', [newCustomerId]);
+      if (!cust.rows.length) { const e = new Error('Customer not found.'); e.status = 404; throw e; }
+      // Move any outstanding balance from the old customer (if any) to the new one.
+      if (s.sale_type !== 'cash' && owed > 0) {
+        if (s.customer_id) await client.query('UPDATE customers SET balance_owed = GREATEST(balance_owed - $1, 0) WHERE id = $2', [owed, s.customer_id]);
+        await client.query('UPDATE customers SET balance_owed = balance_owed + $1 WHERE id = $2', [owed, newCustomerId]);
+      }
+      await client.query('UPDATE sales SET customer_id = $1 WHERE id = $2', [newCustomerId, req.params.id]);
+    });
+    res.json({ message: 'Customer updated for this sale.' });
+  } catch (err) { next(err); }
+}
+
+module.exports = { createSale, getSale, listSales, getSaleByInvoice, editSaleDate, editSaleCustomer };
