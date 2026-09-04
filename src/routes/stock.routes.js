@@ -18,6 +18,7 @@ router.use(authenticate, resolveCompany);
 
 router.get('/', c.branchStock);
 router.get('/movements', c.movements);
+router.get('/branch-movements', requireFeature('transfers.records'), c.branchMovements);
 router.post('/restock', requireFeature('stock.restock'), c.restock);
 router.post('/transfer', requireFeature('stock.transfer'), c.transfer);
 router.post('/transfer-batch', requireFeature('stock.transfer'), c.transferBatch);

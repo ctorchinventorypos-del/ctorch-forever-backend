@@ -40,11 +40,13 @@ const FEATURES = [
   ['category.manage', 'Manage categories', 'Inventory & Products', 'action', false, false],
   ['inventory.print', 'Print inventory', 'Inventory & Products', 'view', true, true],
   ['restocks.print', 'Print restocks log', 'Inventory & Products', 'view', false, true],
+  ['transfers.records', 'View transfer records per branch', 'Inventory & Products', 'view', false, true],
 
   // Customers & Debtors
   ['customer.view', 'View customers', 'Customers & Debtors', 'view', true, false],
   ['customer.add', 'Add customer', 'Customers & Debtors', 'action', true, false],
   ['customer.edit', 'Edit customer', 'Customers & Debtors', 'action', false, false],
+  ['customer.upgrade', 'Upgrade a customer to distributor', 'Customers & Debtors', 'action', false, false],
   ['customer.balance', 'Adjust customer balance', 'Customers & Debtors', 'action', false, false],
   ['customer.statement', 'View customer statement', 'Customers & Debtors', 'view', true, false],
   ['debtors.view', 'View debtors (who owes me)', 'Customers & Debtors', 'view', true, false],
@@ -58,6 +60,7 @@ const FEATURES = [
   ['reports.inventory', 'View Inventory report', 'Dashboard & Reports', 'view', false, false],
   ['reports.daily_cash', 'View Daily cash report', 'Dashboard & Reports', 'view', false, false],
   ['reports.account', 'View Account report', 'Dashboard & Reports', 'view', false, false],
+  ['activity.view', 'View activity record (all transactions)', 'Dashboard & Reports', 'view', false, false],
 
   // Records
   ['records.sales', 'View sales records', 'Records', 'view', true, false],

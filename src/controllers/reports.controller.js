@@ -435,6 +435,75 @@ async function inventoryDetail(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/activity?from=&to=
+// One merged feed of EVERY transaction for the company in a date window:
+// sales (by type / warehouse), payments, returns, restocks, transfers, expenses.
+async function activity(req, res, next) {
+  try {
+    const cid = req.company.id;
+    const from = req.query.from || new Date().toISOString().slice(0, 10);
+    const to = req.query.to || from;
+    const range = 'created_at >= $2::date AND created_at < ($3::date + 1)';
+    const p = [cid, from, to];
+
+    const sales = await query(
+      `SELECT s.id, s.invoice_number AS ref, s.sale_type, s.warehouse_ref, s.total_amount, s.amount_paid, s.created_at,
+              COALESCE(cu.name,'') AS who, u.full_name AS by_user
+       FROM sales s LEFT JOIN customers cu ON cu.id=s.customer_id JOIN users u ON u.id=s.user_id
+       WHERE s.company_id=$1 AND s.${range} ORDER BY s.created_at DESC`, p);
+    const pays = await query(
+      `SELECT pm.id, pm.amount, pm.created_at, COALESCE(cu.name,'') AS who, cu.customer_type, u.full_name AS by_user
+       FROM payments pm LEFT JOIN customers cu ON cu.id=pm.customer_id JOIN users u ON u.id=pm.user_id
+       WHERE pm.company_id=$1 AND pm.${range} ORDER BY pm.created_at DESC`, p);
+    const rets = await query(
+      `SELECT cr.id, cr.return_number AS ref, cr.total_amount, cr.created_at, COALESCE(cu.name,'') AS who, u.full_name AS by_user
+       FROM customer_returns cr LEFT JOIN customers cu ON cu.id=cr.customer_id JOIN users u ON u.id=cr.user_id
+       WHERE cr.company_id=$1 AND cr.${range} ORDER BY cr.created_at DESC`, p);
+    // Stock movements touch the company via the product's company_id.
+    const moves = await query(
+      `SELECT m.id, m.movement_type, m.quantity, m.created_at, p.name AS product_name,
+              fb.name AS from_branch, tb.name AS to_branch, u.full_name AS by_user
+       FROM stock_movements m JOIN products p ON p.id=m.product_id
+       LEFT JOIN branches fb ON fb.id=m.from_branch_id LEFT JOIN branches tb ON tb.id=m.to_branch_id
+       LEFT JOIN users u ON u.id=m.user_id
+       WHERE m.company_id=$1 AND m.${range} ORDER BY m.created_at DESC`, p);
+    const exps = await query(
+      `SELECT e.id, e.amount, e.category, e.created_at, u.full_name AS by_user
+       FROM expenses e LEFT JOIN users u ON u.id=e.user_id
+       WHERE e.company_id=$1 AND e.${range} ORDER BY e.created_at DESC`, p);
+
+    const items = [];
+    const push = (o) => items.push(o);
+    sales.rows.forEach((s) => {
+      const label = s.warehouse_ref ? 'Warehouse sale'
+        : s.sale_type === 'cash' ? 'Cash sale'
+        : s.sale_type === 'credit' ? 'Credit sale' : 'Distributor sale';
+      push({ kind: label, ref: s.ref, amount: Number(s.total_amount), who: s.who, by_user: s.by_user, created_at: s.created_at });
+    });
+    pays.rows.forEach((r) => push({
+      kind: r.customer_type === 'reseller' ? 'Distributor payment' : 'Credit payment',
+      ref: '—', amount: Number(r.amount), who: r.who, by_user: r.by_user, created_at: r.created_at }));
+    rets.rows.forEach((r) => push({ kind: 'Return', ref: r.ref, amount: -Number(r.total_amount), who: r.who, by_user: r.by_user, created_at: r.created_at }));
+    moves.rows.forEach((m) => push({
+      kind: m.movement_type === 'restock' ? 'Restock' : m.movement_type === 'transfer' ? 'Transfer' : `Stock ${m.movement_type}`,
+      ref: m.product_name + (m.movement_type === 'transfer' ? ` (${m.from_branch || '?'} → ${m.to_branch || '?'})` : ''),
+      amount: null, qty: Number(m.quantity), who: '', by_user: m.by_user, created_at: m.created_at }));
+    exps.rows.forEach((e) => push({ kind: 'Expense', ref: e.category || '—', amount: -Number(e.amount), who: '', by_user: e.by_user, created_at: e.created_at }));
+
+    items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // Summary: count + total per kind.
+    const summary = {};
+    items.forEach((i) => {
+      if (!summary[i.kind]) summary[i.kind] = { count: 0, total: 0 };
+      summary[i.kind].count += 1;
+      if (typeof i.amount === 'number') summary[i.kind].total += i.amount;
+    });
+
+    res.json({ from, to, items, summary });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail, activity,
 };

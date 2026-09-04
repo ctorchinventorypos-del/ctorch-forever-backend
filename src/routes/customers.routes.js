@@ -19,6 +19,7 @@ router.get('/', c.listCustomers);
 router.get('/:id', c.getCustomer);
 router.post('/', c.createCustomer);
 router.put('/:id', requireFeature('customer.edit'), c.updateCustomer); // editing existing customer = admin
+router.patch('/:id/upgrade', requireFeature('customer.upgrade'), c.upgradeToDistributor);
 router.patch('/:id/balance', requireFeature('customer.balance'), c.updateBalance); // set amount owed (admin)
 
 module.exports = router;

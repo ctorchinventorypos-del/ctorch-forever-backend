@@ -27,5 +27,6 @@ router.get('/debtors', c.debtors);
 router.get('/daily-cash', requireFeature('reports.daily_cash'), c.dailyCash);
 router.get('/account', requireFeature('reports.account'), c.account);
 router.get('/inventory-detail', c.inventoryDetail);
+router.get('/activity', requireFeature('activity.view'), c.activity);
 
 module.exports = router;

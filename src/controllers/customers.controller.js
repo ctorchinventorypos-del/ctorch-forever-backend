@@ -86,6 +86,11 @@ async function createCustomer(req, res, next) {
     const name = (req.body.name || '').trim();
     const type = req.body.customer_type;
     if (!name) return res.status(400).json({ error: 'Enter a name.' });
+    // A real name must contain at least four letters (guards against blank or
+    // symbol-only entries that were leaving records without a customer name).
+    if ((name.match(/[A-Za-z]/g) || []).length < 4) {
+      return res.status(400).json({ error: 'Enter a proper name with at least 4 letters.' });
+    }
     if (!['general', 'credit', 'reseller'].includes(type)) {
       return res.status(400).json({ error: 'Choose a customer type.' });
     }
@@ -153,4 +158,19 @@ async function updateCustomer(req, res, next) {
   }
 }
 
-module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer, updateBalance };
+
+// PATCH /api/customers/:id/upgrade — turn a general/credit customer into a distributor.
+async function upgradeToDistributor(req, res, next) {
+  try {
+    const cur = await query('SELECT id, customer_type FROM customers WHERE id = $1', [req.params.id]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Customer not found.' });
+    if (cur.rows[0].customer_type === 'reseller') return res.status(400).json({ error: 'This customer is already a distributor.' });
+    const { rows } = await query(
+      "UPDATE customers SET customer_type = 'reseller' WHERE id = $1 RETURNING *",
+      [req.params.id]
+    );
+    res.json({ message: 'Customer upgraded to distributor.', customer: rows[0] });
+  } catch (err) { next(err); }
+}
+
+module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer, updateBalance, upgradeToDistributor };

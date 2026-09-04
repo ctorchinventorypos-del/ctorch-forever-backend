@@ -133,12 +133,17 @@ async function transfer(req, res, next) {
     const result = await withTransaction(async (client) => {
       // Both branches must exist (they may belong to different companies).
       const branches = await client.query(
-        'SELECT id, company_id FROM branches WHERE id = ANY($1)',
+        'SELECT id, company_id, is_warehouse FROM branches WHERE id = ANY($1)',
         [[from_branch_id, to_branch_id]]
       );
       if (branches.rows.length !== 2) {
         const e = new Error('Branch not found.');
         e.status = 404; throw e;
+      }
+      // Stock only flows FROM a warehouse (the central store) TO a branch.
+      const srcBr = branches.rows.find((b) => String(b.id) === String(from_branch_id));
+      if (!srcBr || !srcBr.is_warehouse) {
+        const e = new Error('Transfers can only be made from a warehouse to a branch.'); e.status = 400; throw e;
       }
       // Which company owns the product being moved (for the movement log).
       const prod = await client.query('SELECT company_id FROM products WHERE id = $1', [product_id]);
@@ -258,10 +263,12 @@ async function transferBatch(req, res, next) {
   try {
     const result = await withTransaction(async (client) => {
       const branches = await client.query(
-        'SELECT id, company_id FROM branches WHERE id = ANY($1)',
+        'SELECT id, company_id, is_warehouse FROM branches WHERE id = ANY($1)',
         [[from_branch_id, to_branch_id]]
       );
       if (branches.rows.length !== 2) { const e = new Error('Branch not found.'); e.status = 404; throw e; }
+      const srcB = branches.rows.find((b) => String(b.id) === String(from_branch_id));
+      if (!srcB || !srcB.is_warehouse) { const e = new Error('Transfers can only be made from a warehouse to a branch.'); e.status = 400; throw e; }
       const fromCo = branches.rows.find((b) => String(b.id) === String(from_branch_id))?.company_id;
       const toCo = branches.rows.find((b) => String(b.id) === String(to_branch_id))?.company_id;
       if (fromCo !== toCo && !(await can(req.user, 'stock.transfer_crosscompany'))) {
@@ -370,4 +377,40 @@ async function adjust(req, res, next) {
   }
 }
 
-module.exports = { branchStock, restock, transfer, transferBatch, adjust, movements };
+// GET /api/stock/branch-movements?branch_id=&from=&to=
+// Every product movement in/out of ONE location (any company's product),
+// with direction relative to that branch. Printable per branch.
+async function branchMovements(req, res, next) {
+  try {
+    const branchId = req.query.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'Choose a branch.' });
+    const params = [branchId];
+    let range = '';
+    if (req.query.from) { params.push(req.query.from); range += ` AND m.created_at::date >= $${params.length}::date`; }
+    if (req.query.to) { params.push(req.query.to); range += ` AND m.created_at::date <= $${params.length}::date`; }
+
+    const { rows } = await query(
+      `SELECT m.id, m.movement_type, m.quantity, m.created_at,
+              p.name AS product_name, p.product_code, co.code AS product_company,
+              fb.name AS from_branch, tb.name AS to_branch,
+              CASE WHEN m.to_branch_id = $1 THEN 'in' ELSE 'out' END AS direction,
+              u.full_name AS done_by
+       FROM stock_movements m
+       JOIN products p ON p.id = m.product_id
+       JOIN companies co ON co.id = p.company_id
+       LEFT JOIN branches fb ON fb.id = m.from_branch_id
+       LEFT JOIN branches tb ON tb.id = m.to_branch_id
+       LEFT JOIN users u ON u.id = m.user_id
+       WHERE (m.from_branch_id = $1 OR m.to_branch_id = $1) ${range}
+       ORDER BY m.created_at DESC
+       LIMIT 3000`,
+      params
+    );
+    const totalIn = rows.filter((r) => r.direction === 'in').reduce((s, r) => s + Number(r.quantity), 0);
+    const totalOut = rows.filter((r) => r.direction === 'out').reduce((s, r) => s + Number(r.quantity), 0);
+    res.json({ movements: rows, total_in: totalIn, total_out: totalOut });
+  } catch (err) { next(err); }
+}
+
+module.exports = {
+  branchMovements, branchStock, restock, transfer, transferBatch, adjust, movements };
