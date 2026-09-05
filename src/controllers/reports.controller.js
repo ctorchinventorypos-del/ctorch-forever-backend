@@ -504,6 +504,56 @@ async function activity(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/stock-as-at?branch_id=&date=YYYY-MM-DD
+// Reconstructs each product's quantity at a branch AS AT the end of a past
+// date: current stock minus the net of every movement after that date.
+// (Every movement — restock, sale, transfer, adjustment — is a signed delta.)
+async function stockAsAt(req, res, next) {
+  try {
+    const branchId = req.query.branch_id;
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    if (!branchId) return res.status(400).json({ error: 'Choose a branch.' });
+
+    const branch = await query(
+      `SELECT b.id, b.name, b.is_warehouse, co.code AS company_code
+       FROM branches b JOIN companies co ON co.id = b.company_id WHERE b.id = $1`, [branchId]);
+    if (!branch.rows.length) return res.status(404).json({ error: 'Branch not found.' });
+
+    const { rows } = await query(
+      `SELECT p.id, p.product_code, p.name, p.unit, c.name AS category_name,
+              co.code AS owner_code,
+              COALESCE(sl.quantity, 0)::int AS current_qty,
+              COALESCE(mv.net_after, 0)::int AS net_after
+       FROM products p
+       JOIN companies co ON co.id = p.company_id
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN stock_levels sl ON sl.product_id = p.id AND sl.branch_id = $1
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(CASE WHEN m.to_branch_id = $1 THEN m.quantity ELSE 0 END), 0)
+              - COALESCE(SUM(CASE WHEN m.from_branch_id = $1 THEN m.quantity ELSE 0 END), 0) AS net_after
+         FROM stock_movements m
+         WHERE m.product_id = p.id
+           AND m.created_at >= ($2::date + 1)
+           AND (m.to_branch_id = $1 OR m.from_branch_id = $1)
+       ) mv ON TRUE
+       WHERE p.is_active = TRUE
+       ORDER BY c.name NULLS LAST, p.name`,
+      [branchId, date]
+    );
+
+    const products = rows
+      .map((r) => ({
+        id: r.id, product_code: r.product_code, name: r.name, unit: r.unit,
+        category_name: r.category_name || 'Uncategorised', owner_code: r.owner_code,
+        quantity: Number(r.current_qty) - Number(r.net_after),
+      }))
+      .filter((r) => r.quantity !== 0); // only products that had stock on that date
+
+    const total = products.reduce((s, r) => s + r.quantity, 0);
+    res.json({ branch: branch.rows[0], date, products, total });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail, activity,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail, activity, stockAsAt,
 };

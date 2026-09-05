@@ -39,6 +39,7 @@ const FEATURES = [
   ['stock.adjust', 'Adjust / set exact stock', 'Inventory & Products', 'action', false, false],
   ['category.manage', 'Manage categories', 'Inventory & Products', 'action', false, false],
   ['inventory.print', 'Print inventory', 'Inventory & Products', 'view', true, true],
+  ['stock.asat', 'View stock as at a past date', 'Inventory & Products', 'view', false, true],
   ['restocks.print', 'Print restocks log', 'Inventory & Products', 'view', false, true],
   ['transfers.records', 'View transfer records per branch', 'Inventory & Products', 'view', false, true],
 
