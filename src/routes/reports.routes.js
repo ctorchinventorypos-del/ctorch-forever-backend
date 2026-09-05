@@ -29,5 +29,6 @@ router.get('/account', requireFeature('reports.account'), c.account);
 router.get('/inventory-detail', c.inventoryDetail);
 router.get('/activity', requireFeature('activity.view'), c.activity);
 router.get('/stock-as-at', requireFeature('stock.asat'), c.stockAsAt);
+router.get('/stock-history', requireFeature('stock.history'), c.stockHistory);
 
 module.exports = router;

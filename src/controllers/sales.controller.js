@@ -384,4 +384,85 @@ async function editSaleCustomer(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { createSale, getSale, listSales, getSaleByInvoice, editSaleDate, editSaleCustomer };
+// PUT /api/sales/:id/items  (SUPER ADMIN ONLY)
+// Correct a completed sale's line items. Reverses the original stock, applies
+// the corrected lines, and re-computes the total, amount paid and the
+// customer's balance — all in one transaction. Invoice number is kept.
+async function editSaleItems(req, res, next) {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (items.length === 0) return res.status(400).json({ error: 'A sale must have at least one item.' });
+  if (items.length > 200) return res.status(400).json({ error: 'Too many items.' });
+
+  try {
+    const result = await withTransaction(async (client) => {
+      const saleRes = await client.query(
+        'SELECT id, branch_id, sale_type, total_amount, amount_paid, customer_id FROM sales WHERE id = $1 AND company_id = $2 FOR UPDATE',
+        [req.params.id, req.company.id]
+      );
+      if (!saleRes.rows.length) { const e = new Error('Sale not found.'); e.status = 404; throw e; }
+      const sale = saleRes.rows[0];
+      const branchId = sale.branch_id;
+
+      // 1) Reverse the original lines: put the sold pieces back, then clear them.
+      const oldItems = await client.query('SELECT product_id, quantity FROM sale_items WHERE sale_id = $1', [sale.id]);
+      for (const it of oldItems.rows) {
+        await client.query(
+          `INSERT INTO stock_levels (product_id, branch_id, quantity) VALUES ($1, $2, $3)
+           ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = stock_levels.quantity + EXCLUDED.quantity, updated_at = now()`,
+          [it.product_id, branchId, it.quantity]
+        );
+      }
+      await client.query("DELETE FROM stock_movements WHERE reference_id = $1 AND movement_type = 'sale'", [sale.id]);
+      await client.query('DELETE FROM sale_items WHERE sale_id = $1', [sale.id]);
+
+      // 2) Apply the corrected lines (quantities are in pieces, price per piece).
+      let newTotal = 0;
+      for (const raw of items) {
+        const qty = parseInt(raw.quantity, 10);
+        const price = Number(raw.unit_price);
+        if (!raw.product_id || !qty || qty <= 0 || isNaN(price) || price < 0) {
+          const e = new Error('Each line needs a product, quantity and price.'); e.status = 400; throw e;
+        }
+        const prod = await client.query('SELECT id, cost_price, name FROM products WHERE id = $1', [raw.product_id]);
+        if (!prod.rows.length) { const e = new Error('Product not found.'); e.status = 404; throw e; }
+
+        const sl = await client.query('SELECT quantity FROM stock_levels WHERE product_id = $1 AND branch_id = $2 FOR UPDATE', [raw.product_id, branchId]);
+        const have = sl.rows.length ? sl.rows[0].quantity : 0;
+        if (have < qty) { const e = new Error(`Not enough stock for ${prod.rows[0].name} at this branch. Available: ${have}.`); e.status = 400; throw e; }
+
+        const subtotal = qty * price;
+        newTotal += subtotal;
+        await client.query(
+          `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, subtotal, sold_as, pack_size)
+           VALUES ($1,$2,$3,$4,$5,$6,'piece',1)`,
+          [sale.id, raw.product_id, qty, price, prod.rows[0].cost_price, subtotal]
+        );
+        await client.query('UPDATE stock_levels SET quantity = quantity - $1, updated_at = now() WHERE product_id = $2 AND branch_id = $3', [qty, raw.product_id, branchId]);
+        await client.query(
+          `INSERT INTO stock_movements (company_id, product_id, from_branch_id, quantity, movement_type, reference_id, user_id)
+           VALUES ($1,$2,$3,$4,'sale',$5,$6)`,
+          [req.company.id, raw.product_id, branchId, qty, sale.id, req.user.id]
+        );
+      }
+
+      // 3) Re-figure amount paid + the customer's balance.
+      const oldOwed = Number(sale.total_amount) - Number(sale.amount_paid);
+      let newAmountPaid;
+      if (sale.sale_type === 'cash') newAmountPaid = newTotal;               // cash stays fully paid
+      else newAmountPaid = Math.min(Number(sale.amount_paid), newTotal);      // keep what they paid, capped
+      const newOwed = newTotal - newAmountPaid;
+      if (sale.customer_id) {
+        const delta = newOwed - oldOwed;
+        if (delta !== 0) await client.query('UPDATE customers SET balance_owed = GREATEST(balance_owed + $1, 0) WHERE id = $2', [delta, sale.customer_id]);
+      }
+      await client.query('UPDATE sales SET total_amount = $1, amount_paid = $2 WHERE id = $3', [newTotal, newAmountPaid, sale.id]);
+
+      return { id: sale.id, total_amount: newTotal, amount_paid: newAmountPaid };
+    });
+
+    await logAction({ userId: req.user.id, action: 'edit_sale_items', entity: 'sale', entityId: Number(req.params.id), details: { new_total: result.total_amount }, ip: req.ip });
+    res.json({ message: 'Sale corrected. Stock and balance updated.', ...result });
+  } catch (err) { next(err); }
+}
+
+module.exports = { createSale, getSale, listSales, getSaleByInvoice, editSaleDate, editSaleCustomer, editSaleItems };

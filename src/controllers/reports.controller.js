@@ -554,6 +554,65 @@ async function stockAsAt(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET /api/reports/stock-history?product_id=&branch_id=(optional)
+// The running stock level of ONE product over time, reconstructed from its
+// movements — for a single branch, or totalled across all branches.
+async function stockHistory(req, res, next) {
+  try {
+    const productId = req.query.product_id;
+    const branchId = req.query.branch_id || null; // null = whole product (all branches)
+    if (!productId) return res.status(400).json({ error: 'Choose a product.' });
+
+    const prod = await query('SELECT id, name, product_code, unit FROM products WHERE id = $1', [productId]);
+    if (!prod.rows.length) return res.status(404).json({ error: 'Product not found.' });
+
+    // Current level (branch or total).
+    const cur = branchId
+      ? await query('SELECT COALESCE(quantity,0)::int AS q FROM stock_levels WHERE product_id = $1 AND branch_id = $2', [productId, branchId])
+      : await query('SELECT COALESCE(SUM(quantity),0)::int AS q FROM stock_levels WHERE product_id = $1', [productId]);
+    const current = cur.rows.length ? Number(cur.rows[0].q) : 0;
+
+    // Most recent movements (cap for very busy products).
+    const params = [productId];
+    let scope = '';
+    if (branchId) { params.push(branchId); scope = ` AND (m.from_branch_id = $2 OR m.to_branch_id = $2)`; }
+    const mv = await query(
+      `SELECT m.id, m.movement_type, m.quantity, m.created_at, m.from_branch_id, m.to_branch_id,
+              fb.name AS from_branch, tb.name AS to_branch, u.full_name AS by_user
+       FROM stock_movements m
+       LEFT JOIN branches fb ON fb.id = m.from_branch_id
+       LEFT JOIN branches tb ON tb.id = m.to_branch_id
+       LEFT JOIN users u ON u.id = m.user_id
+       WHERE m.product_id = $1 ${scope}
+       ORDER BY m.created_at DESC LIMIT 1000`,
+      params
+    );
+    const asc = mv.rows.slice().reverse(); // oldest first
+
+    // Signed delta for the chosen scope.
+    const deltaOf = (m) => {
+      let d = 0;
+      if (m.to_branch_id != null && (!branchId || String(m.to_branch_id) === String(branchId))) d += Number(m.quantity);
+      if (m.from_branch_id != null && (!branchId || String(m.from_branch_id) === String(branchId))) d -= Number(m.quantity);
+      return d;
+    };
+    const sumDeltas = asc.reduce((s, m) => s + deltaOf(m), 0);
+    let level = current - sumDeltas; // level just before the first shown movement
+
+    const points = [{ date: asc.length ? asc[0].created_at : new Date().toISOString(), level, type: 'start', label: 'Opening', delta: 0 }];
+    for (const m of asc) {
+      const d = deltaOf(m);
+      level += d;
+      const other = m.movement_type === 'transfer'
+        ? (String(m.to_branch_id) === String(branchId) ? `from ${m.from_branch || '?'}` : `to ${m.to_branch || '?'}`)
+        : '';
+      points.push({ date: m.created_at, level, type: m.movement_type, delta: d, qty: Number(m.quantity), by_user: m.by_user, other });
+    }
+
+    res.json({ product: prod.rows[0], branch_id: branchId, current, points });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail, activity, stockAsAt,
+  dashboard, profit, salesSummary, branchPerformance, inventory, debtors, dailyCash, account, inventoryDetail, activity, stockAsAt, stockHistory,
 };
