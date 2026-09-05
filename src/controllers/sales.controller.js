@@ -163,7 +163,7 @@ async function createSale(req, res, next) {
            (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, created_at, payment_splits)
          VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8, COALESCE($9::timestamptz, now()), $10::jsonb)
          RETURNING id`,
-        [req.company.id, branch_id, req.user.id, customer ? customer.id : null, sale_type, primaryMethod, total, amountPaid, actionDate(req.body.created_at), paySplits]
+        [req.company.id, branch_id, req.user.id, customer_id, sale_type, primaryMethod, total, amountPaid, actionDate(req.body.created_at), paySplits]
       );
       const saleId = inserted.rows[0].id;
 
