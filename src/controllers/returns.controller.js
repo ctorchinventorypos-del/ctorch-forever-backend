@@ -8,6 +8,7 @@
 // ============================================================
 const { actionDate, editDate } = require('../utils/dates');
 const { query, withTransaction } = require('../config/db');
+const { can } = require('../utils/permissions');
 const { logAction } = require('../utils/audit');
 const idempotency = require('../utils/idempotency');
 
@@ -181,11 +182,17 @@ module.exports = { createReturn, listReturns, editReturnDate };
 // POST /api/returns/customer
 // { customer_id, branch_id, items: [{ product_id, quantity, unit_price }], note }
 async function createCustomerReturn(req, res, next) {
-  const { customer_id, branch_id, note } = req.body;
+  const { customer_id, branch_id } = req.body;
+  const note = (req.body.note || '').trim();
+  const refundMode = req.body.refund_mode === 'refund' ? 'refund' : 'credit';
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!customer_id) return res.status(400).json({ error: 'Choose the customer returning the goods.' });
   if (!branch_id) return res.status(400).json({ error: 'Choose where the goods are returned to.' });
   if (items.length === 0) return res.status(400).json({ error: 'Add at least one product to return.' });
+  if (note.length < 3) return res.status(400).json({ error: 'A note is required for a return (say why it is being returned).' });
+  if (refundMode === 'refund' && !(await can(req.user, 'return.refund'))) {
+    return res.status(403).json({ error: 'You are not allowed to give cash refunds.' });
+  }
 
   const idemKey = req.get('Idempotency-Key');
   try {
@@ -218,9 +225,9 @@ async function createCustomerReturn(req, res, next) {
 
       // Header (temporary number first, then a friendly one built from the id).
       const header = await client.query(
-        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id, created_at)
-         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6, COALESCE($7::timestamptz, now())) RETURNING id`,
-        [req.company.id, customer_id, branch_id, total, note || null, req.user.id, actionDate(req.body.created_at)]
+        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id, created_at, refund_mode)
+         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6, COALESCE($7::timestamptz, now()), $8) RETURNING id`,
+        [req.company.id, customer_id, branch_id, total, note, req.user.id, actionDate(req.body.created_at), refundMode]
       );
       const returnId = header.rows[0].id;
       const returnNumber = `${req.company.code}-R${String(returnId).padStart(5, '0')}`;
@@ -246,12 +253,19 @@ async function createCustomerReturn(req, res, next) {
         );
       }
 
-      // Credit / distributor: a return reduces what they owe.
-      if (cust.rows[0].customer_type !== 'general' && total > 0) {
-        await client.query(
-          'UPDATE customers SET balance_owed = GREATEST(0, balance_owed - $1) WHERE id = $2',
-          [total, customer_id]
-        );
+      // Settle the return.
+      if (total > 0) {
+        if (refundMode === 'refund') {
+          // Money handed back — recorded as an expense so it shows in the accounts.
+          await client.query(
+            `INSERT INTO expenses (company_id, amount, category, payment_method, note, user_id, created_at)
+             VALUES ($1, $2, 'Refund', 'cash', $3, $4, COALESCE($5::timestamptz, now()))`,
+            [req.company.id, total, `Refund for ${returnNumber}${note ? ' — ' + note : ''}`, req.user.id, actionDate(req.body.created_at)]
+          );
+        } else {
+          // No refund — add it to the customer's store credit for future purchases.
+          await client.query('UPDATE customers SET store_credit = store_credit + $1 WHERE id = $2', [total, customer_id]);
+        }
       }
 
       return { id: returnId, return_number: returnNumber, total_amount: total };

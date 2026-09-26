@@ -26,7 +26,7 @@ async function listCustomers(req, res, next) {
     }
 
     const { rows } = await query(
-      `SELECT id, name, phone, address, customer_type, balance_owed, created_at
+      `SELECT id, name, phone, address, customer_type, balance_owed, store_credit, created_at
        FROM customers ${where} ORDER BY name`,
       params
     );
@@ -173,4 +173,42 @@ async function upgradeToDistributor(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer, updateBalance, upgradeToDistributor };
+
+// GET /api/customers/:id/purchases
+// Products this customer has bought, each with the dates/quantities/prices,
+// so a return can be tied to the exact purchase. Spans both companies.
+async function getPurchases(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT si.product_id, p.name AS product_name, p.product_code,
+              s.id AS sale_id, s.invoice_number, s.created_at, s.branch_id, co.code AS company_code,
+              si.quantity, si.unit_price,
+              COALESCE((SELECT SUM(cri.quantity) FROM customer_return_items cri
+                        JOIN customer_returns cr ON cr.id = cri.return_id
+                        WHERE cr.customer_id = s.customer_id AND cri.product_id = si.product_id
+                          AND cr.created_at >= s.created_at), 0) AS already_returned
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       JOIN products p ON p.id = si.product_id
+       JOIN companies co ON co.id = s.company_id
+       WHERE s.customer_id = $1
+       ORDER BY p.name, s.created_at DESC`,
+      [req.params.id]
+    );
+    // Group by product, list each purchase (date) under it.
+    const byProduct = new Map();
+    for (const r of rows) {
+      if (!byProduct.has(r.product_id)) {
+        byProduct.set(r.product_id, { product_id: r.product_id, name: r.product_name, product_code: r.product_code, purchases: [] });
+      }
+      byProduct.get(r.product_id).purchases.push({
+        sale_id: r.sale_id, invoice_number: r.invoice_number, created_at: r.created_at,
+        branch_id: r.branch_id, company_code: r.company_code,
+        quantity: Number(r.quantity), unit_price: Number(r.unit_price),
+      });
+    }
+    res.json([...byProduct.values()]);
+  } catch (err) { next(err); }
+}
+
+module.exports = { listCustomers, getCustomer, createCustomer, updateCustomer, updateBalance, upgradeToDistributor, getPurchases };

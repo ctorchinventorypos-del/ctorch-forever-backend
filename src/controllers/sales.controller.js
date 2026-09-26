@@ -153,8 +153,26 @@ async function createSale(req, res, next) {
         }
       }
 
-      // Optional split across multiple payment methods (must add up to amountPaid).
-      const { splits: paySplits, primary: primaryMethod } = buildSplits(req.body.payment_splits, amountPaid, paymentMethod);
+      // Apply store credit (reduces the MONEY the customer pays now).
+      let creditApplied = 0;
+      if (Number(req.body.apply_credit) > 0 && customer_id && (await can(req.user, 'credit.apply'))) {
+        const scRow = await client.query('SELECT store_credit FROM customers WHERE id = $1 FOR UPDATE', [customer_id]);
+        const sc = scRow.rows.length ? Number(scRow.rows[0].store_credit) : 0;
+        creditApplied = Math.max(0, Math.min(Number(req.body.apply_credit), sc, total));
+      }
+      const moneyPaid = sale_type === 'cash' ? Math.max(0, total - creditApplied) : amountPaid;
+      const settledPaid = Math.min(total, moneyPaid + creditApplied);
+
+      // Splits must add up to the MONEY paid (credit part is separate). When
+      // credit is applied we record only the real money so cash reports stay right.
+      let paySplits, primaryMethod;
+      if (creditApplied > 0) {
+        primaryMethod = paymentMethod;
+        paySplits = JSON.stringify([{ method: paymentMethod, amount: moneyPaid }]);
+      } else {
+        const bs = buildSplits(req.body.payment_splits, amountPaid, paymentMethod);
+        paySplits = bs.splits; primaryMethod = bs.primary;
+      }
 
       // 5. Insert the sale. A throwaway unique value is used first, then we
       //    set a friendly invoice number built from the new row's id.
@@ -163,7 +181,7 @@ async function createSale(req, res, next) {
            (company_id, branch_id, user_id, customer_id, sale_type, payment_method, invoice_number, total_amount, amount_paid, created_at, payment_splits)
          VALUES ($1, $2, $3, $4, $5, $6, md5(random()::text || clock_timestamp()::text), $7, $8, COALESCE($9::timestamptz, now()), $10::jsonb)
          RETURNING id`,
-        [req.company.id, branch_id, req.user.id, customer_id, sale_type, primaryMethod, total, amountPaid, actionDate(req.body.created_at), paySplits]
+        [req.company.id, branch_id, req.user.id, customer_id, sale_type, primaryMethod, total, settledPaid, actionDate(req.body.created_at), paySplits]
       );
       const saleId = inserted.rows[0].id;
 
@@ -191,13 +209,18 @@ async function createSale(req, res, next) {
 
       // 7. For credit/reseller, add the unpaid part to their balance.
       if (customer) {
-        const owedAdded = total - amountPaid;
+        const owedAdded = total - settledPaid;
         if (owedAdded > 0) {
           await client.query(
             'UPDATE customers SET balance_owed = balance_owed + $1 WHERE id = $2',
             [owedAdded, customer.id]
           );
         }
+      }
+
+      // Deduct any store credit that was applied.
+      if (creditApplied > 0) {
+        await client.query('UPDATE customers SET store_credit = GREATEST(store_credit - $1, 0) WHERE id = $2', [creditApplied, customer_id]);
       }
 
       // 8. If this sale came from a quotation, mark that quote converted now

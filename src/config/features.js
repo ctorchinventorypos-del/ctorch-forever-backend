@@ -16,6 +16,9 @@ const FEATURES = [
   ['payment.split', 'Split payment across methods', 'Sales & Payments', 'action', true, false],
   ['payment.record', 'Record a customer payment', 'Sales & Payments', 'action', true, false],
   ['return.record', 'Record a return', 'Sales & Payments', 'action', true, false],
+  ['return.refund', 'Give a cash refund on a return (money out)', 'Sales & Payments', 'action', false, false],
+  ['credit.apply', 'Apply store credit to a purchase', 'Sales & Payments', 'action', true, false],
+  ['return.swap', 'Swap returned goods for other items', 'Sales & Payments', 'action', false, false],
 
   // Quotations
   ['quote.create', 'Create sales order', 'Quotations', 'action', true, false],

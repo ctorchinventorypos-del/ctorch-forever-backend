@@ -152,6 +152,11 @@ const STATEMENTS = [
   // Combined sales orders: not tied to one company (goods from both).
   `ALTER TABLE quotations ALTER COLUMN company_id DROP NOT NULL`,
   `ALTER TABLE quotations ADD COLUMN IF NOT EXISTS is_combined BOOLEAN NOT NULL DEFAULT FALSE`,
+
+  // Store credit a customer can spend on future purchases (from no-refund returns).
+  `ALTER TABLE customers ADD COLUMN IF NOT EXISTS store_credit NUMERIC(14,2) NOT NULL DEFAULT 0`,
+  // How a return was settled + whether a note is attached.
+  `ALTER TABLE customer_returns ADD COLUMN IF NOT EXISTS refund_mode VARCHAR(10) NOT NULL DEFAULT 'credit'`,
 ];
 
 async function runMigrations() {

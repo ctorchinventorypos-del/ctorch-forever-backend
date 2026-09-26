@@ -17,6 +17,7 @@ router.use(authenticate, resolveCompany);
 
 router.get('/', c.listCustomers);
 router.get('/:id', c.getCustomer);
+router.get('/:id/purchases', c.getPurchases);
 router.post('/', c.createCustomer);
 router.put('/:id', requireFeature('customer.edit'), c.updateCustomer); // editing existing customer = admin
 router.patch('/:id/upgrade', requireFeature('customer.upgrade'), c.upgradeToDistributor);
