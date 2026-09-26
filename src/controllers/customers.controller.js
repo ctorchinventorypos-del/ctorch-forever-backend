@@ -26,8 +26,16 @@ async function listCustomers(req, res, next) {
     }
 
     const { rows } = await query(
-      `SELECT id, name, phone, address, customer_type, balance_owed, store_credit, created_at
-       FROM customers ${where} ORDER BY name`,
+      `SELECT c.id, c.name, c.phone, c.address, c.customer_type, c.balance_owed, c.store_credit, c.created_at,
+              COALESCE(pc.n, 0)::int AS purchase_count,
+              pc.last_purchase
+       FROM customers c
+       LEFT JOIN (
+         SELECT customer_id, COUNT(*) AS n, MAX(created_at) AS last_purchase
+         FROM sales WHERE customer_id IS NOT NULL GROUP BY customer_id
+       ) pc ON pc.customer_id = c.id
+       ${where.replace(/customer_type/g, 'c.customer_type').replace(/\bname ILIKE/g, 'c.name ILIKE').replace(/\bphone ILIKE/g, 'c.phone ILIKE')}
+       ORDER BY c.name`,
       params
     );
     res.json(rows);
