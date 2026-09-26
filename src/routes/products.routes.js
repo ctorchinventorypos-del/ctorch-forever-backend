@@ -9,16 +9,16 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-const { requireFeature } = require('../utils/permissions');
+const { requireFeature, requireAny } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
 const c = require('../controllers/products.controller');
 
 router.use(authenticate, resolveCompany);
 
-router.get('/', c.listProducts);
+router.get('/', requireAny(['inventory.view','sale.cash','sale.credit','sale.distributor','sale.warehouse']), c.listProducts);
 router.get('/next-code', c.nextCode);
-router.get('/:id', c.getProduct);
+router.get('/:id', requireAny(['inventory.view','sale.cash','sale.credit','sale.distributor','sale.warehouse']), c.getProduct);
 router.post('/', requireFeature('product.add'), c.createProduct);
 router.post('/batch', requireFeature('product.add'), c.createProductsBatch);
 router.put('/:id', requireFeature('product.edit'), c.updateProduct);

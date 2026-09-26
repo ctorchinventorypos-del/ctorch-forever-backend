@@ -8,16 +8,16 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-const { requireFeature } = require('../utils/permissions');
+const { requireFeature, requireAny } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
 const c = require('../controllers/customers.controller');
 
 router.use(authenticate, resolveCompany);
 
-router.get('/', c.listCustomers);
-router.get('/:id', c.getCustomer);
-router.get('/:id/purchases', c.getPurchases);
+router.get('/', requireAny(['customer.view','payment.record','return.record','sale.cash','sale.credit','sale.distributor','sale.warehouse']), c.listCustomers);
+router.get('/:id', requireAny(['customer.view','customer.statement','payment.record','return.record','sale.cash','sale.credit','sale.distributor','sale.warehouse']), c.getCustomer);
+router.get('/:id/purchases', requireAny(['return.record','customer.view']), c.getPurchases);
 router.post('/', c.createCustomer);
 router.put('/:id', requireFeature('customer.edit'), c.updateCustomer); // editing existing customer = admin
 router.patch('/:id/upgrade', requireFeature('customer.upgrade'), c.upgradeToDistributor);

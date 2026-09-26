@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-const { requireFeature } = require('../utils/permissions');
+const { requireFeature, requireAny } = require('../utils/permissions');
 const { resolveCompany } = require('../middleware/company');
 const { requireAdmin } = require('../middleware/roles');
 const { requireStockManager } = require('../middleware/roles');
@@ -16,8 +16,8 @@ const c = require('../controllers/stock.controller');
 
 router.use(authenticate, resolveCompany);
 
-router.get('/', c.branchStock);
-router.get('/movements', c.movements);
+router.get('/', requireAny(['inventory.view','stock.transfer','return.record','sale.cash','sale.credit','sale.distributor','sale.warehouse']), c.branchStock);
+router.get('/movements', requireAny(['transfers.records','records.stock_changes']), c.movements);
 router.get('/branch-movements', requireFeature('transfers.records'), c.branchMovements);
 router.post('/restock', requireFeature('stock.restock'), c.restock);
 router.post('/transfer', requireFeature('stock.transfer'), c.transfer);

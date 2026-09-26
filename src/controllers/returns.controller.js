@@ -184,7 +184,17 @@ module.exports = { createReturn, listReturns, editReturnDate };
 async function createCustomerReturn(req, res, next) {
   const { customer_id, branch_id } = req.body;
   const note = (req.body.note || '').trim();
-  const refundMode = req.body.refund_mode === 'refund' ? 'refund' : 'credit';
+  // How the return is settled:
+  //   refund  -> money handed back (recorded as an expense) via refund_method
+  //   credit  -> added to the customer's store credit (also used by a swap)
+  //   balance -> reduces what a debtor owes ("just a return from a debtor")
+  //   swap    -> banked as credit here; a follow-up sale spends it on new goods
+  const MODES = ['refund', 'credit', 'balance', 'swap'];
+  const refundMode = MODES.includes(req.body.refund_mode) ? req.body.refund_mode : 'credit';
+  const VALID_METHODS = ['cash', 'pos', 'transfer_moniepoint', 'transfer_zenith', 'cheque'];
+  const refundMethod = refundMode === 'refund'
+    ? (VALID_METHODS.includes(req.body.refund_method) ? req.body.refund_method : 'cash')
+    : null;
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!customer_id) return res.status(400).json({ error: 'Choose the customer returning the goods.' });
   if (!branch_id) return res.status(400).json({ error: 'Choose where the goods are returned to.' });
@@ -192,6 +202,9 @@ async function createCustomerReturn(req, res, next) {
   if (note.length < 3) return res.status(400).json({ error: 'A note is required for a return (say why it is being returned).' });
   if (refundMode === 'refund' && !(await can(req.user, 'return.refund'))) {
     return res.status(403).json({ error: 'You are not allowed to give cash refunds.' });
+  }
+  if (refundMode === 'swap' && !(await can(req.user, 'return.swap'))) {
+    return res.status(403).json({ error: 'You are not allowed to swap returned goods.' });
   }
 
   const idemKey = req.get('Idempotency-Key');
@@ -225,9 +238,9 @@ async function createCustomerReturn(req, res, next) {
 
       // Header (temporary number first, then a friendly one built from the id).
       const header = await client.query(
-        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id, created_at, refund_mode)
-         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6, COALESCE($7::timestamptz, now()), $8) RETURNING id`,
-        [req.company.id, customer_id, branch_id, total, note, req.user.id, actionDate(req.body.created_at), refundMode]
+        `INSERT INTO customer_returns (company_id, customer_id, branch_id, return_number, total_amount, note, user_id, created_at, refund_mode, refund_method)
+         VALUES ($1, $2, $3, md5(random()::text), $4, $5, $6, COALESCE($7::timestamptz, now()), $8, $9) RETURNING id`,
+        [req.company.id, customer_id, branch_id, total, note, req.user.id, actionDate(req.body.created_at), refundMode, refundMethod]
       );
       const returnId = header.rows[0].id;
       const returnNumber = `${req.company.code}-R${String(returnId).padStart(5, '0')}`;
@@ -253,17 +266,20 @@ async function createCustomerReturn(req, res, next) {
         );
       }
 
-      // Settle the return.
+      // Settle the return by its mode.
       if (total > 0) {
         if (refundMode === 'refund') {
-          // Money handed back — recorded as an expense so it shows in the accounts.
+          // Money handed back — recorded as an expense (with the method used).
           await client.query(
             `INSERT INTO expenses (company_id, amount, category, payment_method, note, user_id, created_at)
-             VALUES ($1, $2, 'Refund', 'cash', $3, $4, COALESCE($5::timestamptz, now()))`,
-            [req.company.id, total, `Refund for ${returnNumber}${note ? ' — ' + note : ''}`, req.user.id, actionDate(req.body.created_at)]
+             VALUES ($1, $2, 'Refund', $3, $4, $5, COALESCE($6::timestamptz, now()))`,
+            [req.company.id, total, refundMethod, `Refund for ${returnNumber}${note ? ' — ' + note : ''}`, req.user.id, actionDate(req.body.created_at)]
           );
+        } else if (refundMode === 'balance') {
+          // Debtor return: reduce what they owe (clamped at zero).
+          await client.query('UPDATE customers SET balance_owed = GREATEST(balance_owed - $1, 0) WHERE id = $2', [total, customer_id]);
         } else {
-          // No refund — add it to the customer's store credit for future purchases.
+          // credit or swap — add to store credit (a swap's later sale spends it).
           await client.query('UPDATE customers SET store_credit = store_credit + $1 WHERE id = $2', [total, customer_id]);
         }
       }
@@ -289,8 +305,8 @@ async function listCustomerReturns(req, res, next) {
     if (req.query.from) { params.push(req.query.from); filter += ` AND cr.created_at::date >= $${params.length}::date`; }
     if (req.query.to) { params.push(req.query.to); filter += ` AND cr.created_at::date <= $${params.length}::date`; }
     const { rows } = await query(
-      `SELECT cr.id, cr.return_number, cr.total_amount, cr.created_at,
-              cu.name AS customer_name, b.name AS branch_name, u.full_name AS processed_by
+      `SELECT cr.id, cr.return_number, cr.total_amount, cr.created_at, cr.refund_mode, cr.refund_method,
+              cu.name AS customer_name, cu.customer_type, b.name AS branch_name, u.full_name AS processed_by
        FROM customer_returns cr
        JOIN customers cu ON cu.id = cr.customer_id
        JOIN branches b ON b.id = cr.branch_id
@@ -307,7 +323,7 @@ async function listCustomerReturns(req, res, next) {
 async function getCustomerReturn(req, res, next) {
   try {
     const head = await query(
-      `SELECT cr.id, cr.return_number, cr.total_amount, cr.note, cr.created_at,
+      `SELECT cr.id, cr.return_number, cr.total_amount, cr.note, cr.created_at, cr.refund_mode, cr.refund_method,
               cu.name AS customer_name, cu.phone AS customer_phone,
               b.name AS branch_name, u.full_name AS processed_by,
               co.name AS company_name, co.code AS company_code

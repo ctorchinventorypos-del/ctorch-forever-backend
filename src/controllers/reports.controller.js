@@ -8,7 +8,8 @@
 // ============================================================
 const { query } = require('../config/db');
 
-const isAdmin = (req) => req.user && req.user.role === 'admin';
+const { can, isAdminRole } = require('../utils/permissions');
+const isAdmin = (req) => isAdminRole(req.user && req.user.role);
 
 // Build a "created_at within [from, to]" clause; "to" includes the whole day.
 function dateClause(params, from, to, col = 's.created_at') {
@@ -24,7 +25,7 @@ function dateClause(params, from, to, col = 's.created_at') {
 async function dashboard(req, res, next) {
   try {
     const cid = req.company.id;
-    const admin = isAdmin(req);
+    const showMoney = await can(req.user, 'dashboard.money');
 
     const money = await query(
       `SELECT
@@ -38,7 +39,7 @@ async function dashboard(req, res, next) {
     );
 
     let profitToday = null, profitMonth = null;
-    if (admin) {
+    if (showMoney) {
       const prof = await query(
         `SELECT
            COALESCE(SUM(CASE WHEN s.created_at::date = CURRENT_DATE
@@ -73,16 +74,19 @@ async function dashboard(req, res, next) {
     );
 
     const m = money.rows[0];
+    // Money figures only for users allowed to see them; everyone still gets
+    // the low-stock count (their operational nudge).
     res.json({
-      revenue_today: Number(m.revenue_today),
-      revenue_month: Number(m.revenue_month),
-      sales_today: Number(m.sales_today),
-      sales_month: Number(m.sales_month),
+      revenue_today: showMoney ? Number(m.revenue_today) : null,
+      revenue_month: showMoney ? Number(m.revenue_month) : null,
+      sales_today: showMoney ? Number(m.sales_today) : null,
+      sales_month: showMoney ? Number(m.sales_month) : null,
       profit_today: profitToday,
       profit_month: profitMonth,
-      owed: Number(owed.rows[0].owed),
-      debtors: Number(owed.rows[0].debtors),
+      owed: showMoney ? Number(owed.rows[0].owed) : null,
+      debtors: showMoney ? Number(owed.rows[0].debtors) : null,
       low_stock: Number(low.rows[0].low_stock),
+      can_see_money: showMoney,
     });
   } catch (err) { next(err); }
 }

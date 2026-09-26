@@ -157,6 +157,7 @@ const STATEMENTS = [
   `ALTER TABLE customers ADD COLUMN IF NOT EXISTS store_credit NUMERIC(14,2) NOT NULL DEFAULT 0`,
   // How a return was settled + whether a note is attached.
   `ALTER TABLE customer_returns ADD COLUMN IF NOT EXISTS refund_mode VARCHAR(10) NOT NULL DEFAULT 'credit'`,
+  `ALTER TABLE customer_returns ADD COLUMN IF NOT EXISTS refund_method VARCHAR(30)`,
 ];
 
 async function runMigrations() {

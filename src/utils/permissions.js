@@ -63,4 +63,21 @@ function requireFeature(featureKey) {
   };
 }
 
-module.exports = { permissionsFor, can, requireFeature, isAdminRole };
+
+// Passes if the user has ANY of the given features (used for reads that several
+// roles legitimately need, e.g. the customer list is needed to view OR to sell).
+async function canAny(user, keys) {
+  for (const k of keys) { if (await can(user, k)) return true; }
+  return false;
+}
+// Middleware form of canAny.
+function requireAny(keys) {
+  return async (req, res, next) => {
+    try {
+      if (await canAny(req.user, keys)) return next();
+      return res.status(403).json({ error: 'You do not have access to this.' });
+    } catch (err) { next(err); }
+  };
+}
+
+module.exports = { permissionsFor, can, canAny, requireFeature, requireAny, isAdminRole };
